@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import {
   AlertTriangle,
   ArrowRight,
@@ -14,6 +14,7 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
+import { CatalogManagePanel } from '../components/CatalogManagePanel';
 import type { PageId } from '../components/EquipmentCard';
 import { HeroBenchDoodle } from '../components/LabDoodles';
 import {
@@ -80,14 +81,27 @@ interface ReasonModalState {
   decision: 'Rejected' | 'Changes requested';
 }
 
+type WorkspaceTabId = 'approvals' | 'subjects' | 'equipment' | 'slots';
+
+const WORKSPACE_TABS: { id: WorkspaceTabId; label: string }[] = [
+  { id: 'approvals', label: 'Approvals' },
+  { id: 'subjects', label: 'Subjects & Labs' },
+  { id: 'equipment', label: 'Equipment' },
+  { id: 'slots', label: 'Slots' },
+];
+
 export function FacultyApprovalsPage({
   currentUser,
   onNavigate,
   onDataMutated,
 }: FacultyApprovalsPageProps) {
+  const [activeTab, setActiveTab] = useState<WorkspaceTabId>('approvals');
   const [queueFilter, setQueueFilter] = useState<QueueFilter>('Pending');
   const [departmentFilter, setDepartmentFilter] = useState('');
-  const [liveMessage, setLiveMessage] = useState('');
+  const [liveNotice, setLiveNotice] = useState<{
+    kind: 'success' | 'error';
+    text: string;
+  } | null>(null);
   const [modalState, setModalState] = useState<ReasonModalState | null>(null);
   const [reasonDraft, setReasonDraft] = useState('');
   const [reasonError, setReasonError] = useState('');
@@ -95,6 +109,12 @@ export function FacultyApprovalsPage({
   const modalRef = useRef<HTMLDivElement | null>(null);
   const reasonInputRef = useRef<HTMLTextAreaElement | null>(null);
   const triggerBtnRef = useRef<HTMLButtonElement | null>(null);
+  const tabButtonRefs = useRef<Record<WorkspaceTabId, HTMLButtonElement | null>>({
+    approvals: null,
+    subjects: null,
+    equipment: null,
+    slots: null,
+  });
 
   useEffect(() => {
     if (!modalState) return;
@@ -193,7 +213,10 @@ export function FacultyApprovalsPage({
   const handleStartReview = (req: AccessRequest) => {
     const result = transitionAccessRequest(req.id, 'Under review');
     if (result?.ok) {
-      setLiveMessage(`Started faculty review for "${req.project}" (${req.student}).`);
+      setLiveNotice({
+        kind: 'success',
+        text: `Started faculty review for "${req.project}" (${req.student}).`,
+      });
       onDataMutated();
     }
   };
@@ -204,9 +227,10 @@ export function FacultyApprovalsPage({
       `Approved by ${currentUser.name}; booking unlocked for requested equipment.`;
     const updated = reviewAccessRequest(req.id, 'Approved', note);
     if (updated) {
-      setLiveMessage(
-        `Approved "${updated.project}" for ${updated.student}. Booking is now unlocked.`
-      );
+      setLiveNotice({
+        kind: 'success',
+        text: `Approved "${updated.project}" for ${updated.student}. Booking is now unlocked.`,
+      });
       onDataMutated();
     }
   };
@@ -245,9 +269,10 @@ export function FacultyApprovalsPage({
       trimmed
     );
     if (updated) {
-      setLiveMessage(
-        `Marked "${updated.project}" as ${updated.status} with reason recorded.`
-      );
+      setLiveNotice({
+        kind: 'success',
+        text: `Marked "${updated.project}" as ${updated.status} with reason recorded.`,
+      });
       setModalState(null);
       setReasonError('');
       onDataMutated();
@@ -255,17 +280,42 @@ export function FacultyApprovalsPage({
     }
   };
 
+  const handleTabKeyDown = (
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    currentIndex: number
+  ) => {
+    let nextIndex: number | null = null;
+    if (event.key === 'ArrowRight') {
+      nextIndex = (currentIndex + 1) % WORKSPACE_TABS.length;
+    } else if (event.key === 'ArrowLeft') {
+      nextIndex =
+        (currentIndex - 1 + WORKSPACE_TABS.length) % WORKSPACE_TABS.length;
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = WORKSPACE_TABS.length - 1;
+    }
+
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const nextTab = WORKSPACE_TABS[nextIndex];
+    setActiveTab(nextTab.id);
+    window.requestAnimationFrame(() => {
+      tabButtonRefs.current[nextTab.id]?.focus();
+    });
+  };
+
   return (
     <div className="space-y-6">
-      {/* Header + 4 Summary Tiles */}
+      {/* Header, Workspace Tabs + 4 Summary Tiles */}
       <section className="notebook-sheet p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-[var(--ink)] sm:text-4xl">
-              Faculty Approvals
+              Faculty Approvals &amp; Manage
             </h1>
             <p className="mt-1 text-base text-[var(--ink)]">
-              Review pending student requests, resolve equipment conflicts, and monitor campus bench utilization.
+              Review pending student requests, resolve equipment conflicts, and manage campus subjects, labs, equipment, and slots.
             </p>
           </div>
           <span className="rounded-[10px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-3 py-1.5 text-sm font-bold text-[var(--ink)]">
@@ -273,17 +323,54 @@ export function FacultyApprovalsPage({
           </span>
         </div>
 
+        {/* Accessible Faculty Workspace Tablist */}
         <div
-          aria-live="polite"
-          className="mt-3 min-h-[1.25rem]"
+          role="tablist"
+          aria-label="Faculty workspace sections"
+          className="mt-4 flex flex-wrap gap-2 border-t-2 border-dashed border-[var(--ink)]/25 pt-4"
         >
-          {liveMessage && (
+          {WORKSPACE_TABS.map((tab, idx) => {
+            const isSelected = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                ref={(el) => {
+                  tabButtonRefs.current[tab.id] = el;
+                }}
+                id={`faculty-tab-${tab.id}`}
+                type="button"
+                role="tab"
+                aria-selected={isSelected}
+                aria-controls={`faculty-panel-${tab.id}`}
+                tabIndex={isSelected ? 0 : -1}
+                onClick={() => setActiveTab(tab.id)}
+                onKeyDown={(e) => handleTabKeyDown(e, idx)}
+                className={`labora-btn text-sm ${
+                  isSelected ? '' : 'labora-btn-paper'
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
+        <div aria-live="polite" className="mt-3 min-h-[1.25rem]">
+          {liveNotice && (
             <div
               role="status"
-              className="flex items-center gap-2 rounded-[10px] border-2 border-[var(--ink)] bg-[var(--status-available-bg)] px-3 py-2 text-base font-bold text-[var(--ink)]"
+              className={`flex items-center gap-2 rounded-[10px] border-2 border-[var(--ink)] px-3 py-2 text-base font-bold text-[var(--ink)] ${
+                liveNotice.kind === 'error'
+                  ? 'bg-[var(--status-booked-bg)]'
+                  : 'bg-[var(--status-available-bg)]'
+              }`}
             >
-              <CheckCircle2 className="h-5 w-5 shrink-0" aria-hidden="true" />
-              <span>{liveMessage}</span>
+              {liveNotice.kind === 'error' ? (
+                <AlertTriangle className="h-5 w-5 shrink-0" aria-hidden="true" />
+              ) : (
+                <CheckCircle2 className="h-5 w-5 shrink-0" aria-hidden="true" />
+              )}
+              <span>{liveNotice.text}</span>
             </div>
           )}
         </div>
@@ -341,51 +428,57 @@ export function FacultyApprovalsPage({
           </div>
         </div>
 
-        {/* Queue Filter Controls */}
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t-2 border-dashed border-[var(--ink)]/25 pt-4">
-          <div
-            className="flex flex-wrap items-center gap-2"
-            role="group"
-            aria-label="Approval status filter"
-          >
-            {QUEUE_FILTERS.map((opt) => (
-              <button
-                key={opt.value || 'all'}
-                type="button"
-                onClick={() => setQueueFilter(opt.value)}
-                aria-pressed={queueFilter === opt.value}
-                className={`labora-btn text-sm ${
-                  queueFilter === opt.value ? '' : 'labora-btn-paper'
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="w-full sm:w-64">
-            <label htmlFor="approvals-dept" className="sr-only">
-              Filter by department
-            </label>
-            <select
-              id="approvals-dept"
-              value={departmentFilter}
-              onChange={(e) => setDepartmentFilter(e.target.value)}
-              className="notebook-input"
+        {activeTab === 'approvals' && (
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t-2 border-dashed border-[var(--ink)]/25 pt-4">
+            <div
+              className="flex flex-wrap items-center gap-2"
+              role="group"
+              aria-label="Approval status filter"
             >
-              <option value="">All Departments</option>
-              {departments.map((dept) => (
-                <option key={dept.id} value={dept.id}>
-                  {dept.name}
-                </option>
+              {QUEUE_FILTERS.map((opt) => (
+                <button
+                  key={opt.value || 'all'}
+                  type="button"
+                  onClick={() => setQueueFilter(opt.value)}
+                  aria-pressed={queueFilter === opt.value}
+                  className={`labora-btn text-sm ${
+                    queueFilter === opt.value ? '' : 'labora-btn-paper'
+                  }`}
+                >
+                  {opt.label}
+                </button>
               ))}
-            </select>
+            </div>
+
+            <div className="w-full sm:w-64">
+              <label htmlFor="approvals-dept" className="sr-only">
+                Filter by department
+              </label>
+              <select
+                id="approvals-dept"
+                value={departmentFilter}
+                onChange={(e) => setDepartmentFilter(e.target.value)}
+                className="notebook-input"
+              >
+                <option value="">All Departments</option>
+                {departments.map((dept) => (
+                  <option key={dept.id} value={dept.id}>
+                    {dept.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-        </div>
+        )}
       </section>
 
-      {/* Main Two-Column Faculty Workspace: Queue + Analytics/Conflicts */}
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+      {activeTab === 'approvals' ? (
+        <div
+          id="faculty-panel-approvals"
+          role="tabpanel"
+          aria-labelledby="faculty-tab-approvals"
+          className="grid grid-cols-1 gap-6 xl:grid-cols-12"
+        >
         {/* Approval Queue */}
         <section aria-label="Approval queue" className="space-y-4 xl:col-span-7">
           {filteredRequests.length === 0 ? (
@@ -691,7 +784,20 @@ export function FacultyApprovalsPage({
             </ul>
           </section>
         </aside>
-      </div>
+        </div>
+      ) : (
+        <div
+          id={`faculty-panel-${activeTab}`}
+          role="tabpanel"
+          aria-labelledby={`faculty-tab-${activeTab}`}
+        >
+          <CatalogManagePanel
+            activeTab={activeTab}
+            onNotify={(kind, text) => setLiveNotice({ kind, text })}
+            onDataMutated={onDataMutated}
+          />
+        </div>
+      )}
 
       {/* Accessible Focus-Trapped Reason Dialog for Reject / Request Changes */}
       {modalState && (

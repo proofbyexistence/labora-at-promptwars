@@ -1,5 +1,27 @@
 import seedData from '../data/labs.json';
 import {
+  addDepartment as pureAddDepartment,
+  addItem as pureAddItem,
+  addLab as pureAddLab,
+  addSlots as pureAddSlots,
+  deleteDepartment as pureDeleteDepartment,
+  deleteItem as pureDeleteItem,
+  deleteLab as pureDeleteLab,
+  deleteSlot as pureDeleteSlot,
+  editDepartment as pureEditDepartment,
+  editItem as pureEditItem,
+  editLab as pureEditLab,
+  getDependents as pureGetDependents,
+  type AddSlotsInput,
+  type CatalogMutationResult,
+  type CatalogSnapshot,
+  type DeleteOption,
+  type DepartmentInput,
+  type DependentReport,
+  type EquipmentInput,
+  type LabInput,
+} from './catalog-admin';
+import {
   normalizeSelectedItemIds,
   transitionRequest,
   validateRequest,
@@ -25,6 +47,8 @@ import type {
 const STORAGE_KEY = 'labora_notebook_state_v1';
 
 interface PersistedState {
+  departments: Department[];
+  labs: Lab[];
   items: EquipmentItem[];
   slots: TimeSlot[];
   requests: AccessRequest[];
@@ -108,13 +132,19 @@ function loadInitialState(): {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<PersistedState>;
-        if (Array.isArray(parsed.items) && parsed.items.length > 0) {
+        if (Array.isArray(parsed.departments)) {
+          base.departments = parsed.departments;
+        }
+        if (Array.isArray(parsed.labs)) {
+          base.labs = parsed.labs;
+        }
+        if (Array.isArray(parsed.items)) {
           base.items = parsed.items;
         }
-        if (Array.isArray(parsed.slots) && parsed.slots.length > 0) {
+        if (Array.isArray(parsed.slots)) {
           base.slots = parsed.slots;
         }
-        if (Array.isArray(parsed.requests) && parsed.requests.length > 0) {
+        if (Array.isArray(parsed.requests)) {
           base.requests = parsed.requests.map(normalizePersistedRequest);
         }
         // Demo role switch state persisted locally (defaults to student).
@@ -136,6 +166,8 @@ function persistState(): void {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       const payload: PersistedState = {
+        departments: state.dataset.departments,
+        labs: state.dataset.labs,
         items: state.dataset.items,
         slots: state.dataset.slots,
         requests: state.dataset.requests,
@@ -471,6 +503,154 @@ export function reviewAccessRequest(
   state.dataset.requests[idx] = result.request;
   persistState();
   return { ...result.request };
+}
+
+function getCatalogSnapshot(): CatalogSnapshot {
+  return {
+    departments: state.dataset.departments,
+    labs: state.dataset.labs,
+    items: state.dataset.items,
+    slots: state.dataset.slots,
+    requests: state.dataset.requests,
+  };
+}
+
+function commitCatalogResult<T>(
+  result: CatalogMutationResult<T>
+): CatalogMutationResult<T> {
+  if (result.ok && result.nextState) {
+    state.dataset.departments = result.nextState.departments;
+    state.dataset.labs = result.nextState.labs;
+    state.dataset.items = result.nextState.items;
+    state.dataset.slots = result.nextState.slots;
+    state.dataset.requests = result.nextState.requests;
+    persistState();
+  }
+  return result;
+}
+
+export function getEntityDependents(entity: {
+  type: 'department' | 'lab' | 'item' | 'slot';
+  id: string;
+}): DependentReport {
+  return pureGetDependents(entity, getCatalogSnapshot());
+}
+
+export function adminAddDepartment(
+  input: DepartmentInput
+): CatalogMutationResult<Department> {
+  return commitCatalogResult(
+    pureAddDepartment(state.activeRole, input, getCatalogSnapshot())
+  );
+}
+
+export function adminEditDepartment(
+  departmentId: string,
+  input: DepartmentInput
+): CatalogMutationResult<Department> {
+  return commitCatalogResult(
+    pureEditDepartment(state.activeRole, departmentId, input, getCatalogSnapshot())
+  );
+}
+
+export function adminDeleteDepartment(
+  departmentId: string,
+  option?: DeleteOption
+): CatalogMutationResult<Department> {
+  return commitCatalogResult(
+    pureDeleteDepartment(
+      state.activeRole,
+      departmentId,
+      getCatalogSnapshot(),
+      option,
+      DEFAULT_REFERENCE_DATE
+    )
+  );
+}
+
+export function adminAddLab(input: LabInput): CatalogMutationResult<Lab> {
+  return commitCatalogResult(
+    pureAddLab(state.activeRole, input, getCatalogSnapshot())
+  );
+}
+
+export function adminEditLab(
+  labId: string,
+  input: LabInput
+): CatalogMutationResult<Lab> {
+  return commitCatalogResult(
+    pureEditLab(state.activeRole, labId, input, getCatalogSnapshot())
+  );
+}
+
+export function adminDeleteLab(
+  labId: string,
+  option?: DeleteOption
+): CatalogMutationResult<Lab> {
+  return commitCatalogResult(
+    pureDeleteLab(
+      state.activeRole,
+      labId,
+      getCatalogSnapshot(),
+      option,
+      DEFAULT_REFERENCE_DATE
+    )
+  );
+}
+
+export function adminAddItem(
+  input: EquipmentInput
+): CatalogMutationResult<EquipmentItem> {
+  return commitCatalogResult(
+    pureAddItem(state.activeRole, input, getCatalogSnapshot())
+  );
+}
+
+export function adminEditItem(
+  itemId: string,
+  input: EquipmentInput
+): CatalogMutationResult<EquipmentItem> {
+  return commitCatalogResult(
+    pureEditItem(state.activeRole, itemId, input, getCatalogSnapshot())
+  );
+}
+
+export function adminDeleteItem(
+  itemId: string,
+  option?: DeleteOption
+): CatalogMutationResult<EquipmentItem> {
+  return commitCatalogResult(
+    pureDeleteItem(
+      state.activeRole,
+      itemId,
+      getCatalogSnapshot(),
+      option,
+      DEFAULT_REFERENCE_DATE
+    )
+  );
+}
+
+export function adminAddSlots(
+  input: AddSlotsInput
+): CatalogMutationResult<TimeSlot[]> {
+  return commitCatalogResult(
+    pureAddSlots(state.activeRole, input, getCatalogSnapshot(), DEFAULT_REFERENCE_DATE)
+  );
+}
+
+export function adminDeleteSlot(
+  slotId: string,
+  option?: DeleteOption
+): CatalogMutationResult<TimeSlot> {
+  return commitCatalogResult(
+    pureDeleteSlot(
+      state.activeRole,
+      slotId,
+      getCatalogSnapshot(),
+      option,
+      DEFAULT_REFERENCE_DATE
+    )
+  );
 }
 
 export function resetLabStore(): void {

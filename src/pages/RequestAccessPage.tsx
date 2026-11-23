@@ -113,7 +113,8 @@ export function RequestAccessPage({
   const justificationRef = useRef<HTMLTextAreaElement | null>(null);
   const trainingRef = useRef<HTMLInputElement | null>(null);
 
-  const selectedItems = selectedItemIds
+  const validSelectedIds = selectedItemIds.filter((id) => itemMap.has(id));
+  const selectedItems = validSelectedIds
     .map((id) => itemMap.get(id))
     .filter((item): item is EquipmentItem => Boolean(item));
   const requiresTraining = selectedItems.some(
@@ -187,7 +188,7 @@ export function RequestAccessPage({
         departmentId,
         teamSize,
         deadline,
-        itemIds: selectedItemIds,
+        itemIds: validSelectedIds,
         hoursNeeded,
         justification,
         trainingConfirmed,
@@ -214,7 +215,7 @@ export function RequestAccessPage({
       departmentId,
       teamSize,
       deadline,
-      itemIds: selectedItemIds,
+      itemIds: validSelectedIds,
       hoursNeeded,
       justification,
       trainingConfirmed,

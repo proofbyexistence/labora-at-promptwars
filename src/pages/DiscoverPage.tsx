@@ -106,6 +106,33 @@ export function DiscoverPage({
     (_, idx) => idx + 1
   );
 
+  // If the currently viewed lab or subject was deleted by faculty admin, show a friendly recovery state.
+  if ((filters.labId && !activeLab) || (filters.departmentId && !activeDepartment)) {
+    return (
+      <section className="notebook-sheet p-8 text-center">
+        <HeroBenchDoodle className="mx-auto mb-4 h-36 w-auto" />
+        <h1 className="text-3xl font-bold text-[var(--ink)]">
+          Laboratory or subject no longer listed
+        </h1>
+        <p className="mx-auto mt-2 max-w-lg text-base text-[var(--ink)]">
+          This laboratory or subject was removed from the campus catalog. Return to Discover to browse active labs and instruments.
+        </p>
+        <a
+          href="#discover"
+          onClick={(e) => {
+            e.preventDefault();
+            setSearchDraft('');
+            onClearFilters();
+          }}
+          className="labora-btn mt-5"
+        >
+          <RotateCcw className="h-4 w-4 shrink-0" aria-hidden="true" />
+          Back to Discover
+        </a>
+      </section>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Page Header & Active Lab Context */}

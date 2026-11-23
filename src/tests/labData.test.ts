@@ -11,6 +11,31 @@ import {
   serializeHashState,
 } from '../js/filter';
 import {
+  addDepartment,
+  addItem,
+  addLab,
+  addSlots,
+  deleteDepartment,
+  deleteItem,
+  deleteLab,
+  deleteSlot,
+  editDepartment,
+  editItem,
+  editLab,
+  getDependents,
+} from '../js/catalog-admin';
+import {
+  adminAddDepartment,
+  adminAddItem,
+  adminAddLab,
+  adminAddSlots,
+  adminDeleteDepartment,
+  adminDeleteItem,
+  adminDeleteLab,
+  adminDeleteSlot,
+  adminEditDepartment,
+  adminEditItem,
+  adminEditLab,
   applyAllocationSuggestion,
   bookSlot,
   cancelSlotBooking,
@@ -18,6 +43,7 @@ import {
   getAllSlots,
   getCurrentUser,
   getDepartments,
+  getEntityDependents,
   getItemById,
   getItems,
   getLabs,
@@ -389,8 +415,282 @@ function runTests() {
   const released = cancelSlotBooking(openSlot.id, 'eq-phy-01');
   assert.equal(released?.booked, false);
 
+  // 11. Catalog Management (catalog-admin.ts + labData.ts) tests
+  resetLabStore();
+  // Role guard: Student cannot invoke any catalog admin function
+  assert.equal(getCurrentUser().role, 'student');
+  assert.equal(adminAddDepartment({ name: 'Aerospace' }).ok, false);
+  assert.equal(adminEditDepartment('dept-physics', { name: 'Applied Physics' }).ok, false);
+  assert.equal(adminDeleteDepartment('dept-physics').ok, false);
+  assert.equal(adminAddLab({ departmentId: 'dept-physics', name: 'Laser Lab' }).ok, false);
+  assert.equal(adminEditLab('lab-phy-optics', { departmentId: 'dept-physics', name: 'Optics II' }).ok, false);
+  assert.equal(adminDeleteLab('lab-phy-optics').ok, false);
+  assert.equal(
+    adminAddItem({
+      name: 'Laser Meter',
+      departmentId: 'dept-physics',
+      labId: 'lab-phy-optics',
+      type: 'Instruments',
+      location: 'SHN-204',
+      status: 'Available',
+      accessLevel: 'Open',
+      specs: '1 mW to 5 W power meter',
+    }).ok,
+    false
+  );
+  assert.equal(
+    adminEditItem('eq-phy-01', {
+      name: 'Spectrometer',
+      departmentId: 'dept-physics',
+      labId: 'lab-phy-optics',
+      type: 'Instruments',
+      location: 'SHN-204',
+      status: 'Available',
+      accessLevel: 'Open',
+      specs: 'Updated',
+    }).ok,
+    false
+  );
+  assert.equal(adminDeleteItem('eq-phy-01').ok, false);
+  assert.equal(
+    adminAddSlots({ itemId: 'eq-phy-01', date: '2026-11-27', startTime: '09:00', endTime: '11:00' }).ok,
+    false
+  );
+  assert.equal(adminDeleteSlot('sl-001').ok, false);
+
+  // Also test pure functions directly with 'student' role
+  const snapshot = {
+    departments: getDepartments(),
+    labs: getLabs(),
+    items: getItems(),
+    slots: getAllSlots(),
+    requests: getRequests(),
+  };
+  assert.equal(addDepartment('student', { name: 'Aerospace' }, snapshot).ok, false);
+  assert.equal(editDepartment('student', 'dept-physics', { name: 'Optics' }, snapshot).ok, false);
+  assert.equal(deleteDepartment('student', 'dept-physics', snapshot, 'cancelAffected').ok, false);
+  assert.equal(addLab('student', { departmentId: 'dept-physics', name: 'X' }, snapshot).ok, false);
+  assert.equal(editLab('student', 'lab-phy-optics', { departmentId: 'dept-physics', name: 'X' }, snapshot).ok, false);
+  assert.equal(deleteLab('student', 'lab-phy-optics', snapshot, 'cancelAffected').ok, false);
+  assert.equal(deleteItem('student', 'eq-phy-01', snapshot, 'cancelAffected').ok, false);
+  assert.equal(
+    addSlots('student', { itemId: 'eq-phy-01', date: '2026-11-27', startTime: '09:00', endTime: '10:00' }, snapshot).ok,
+    false
+  );
+  assert.equal(deleteSlot('student', 'sl-001', snapshot).ok, false);
+
+  // Switch to faculty for valid catalog management checks
+  switchUserRole('faculty');
+
+  // Departments: uniqueness & length validation
+  assert.equal(adminAddDepartment({ name: 'P' }).ok, false);
+  assert.equal(adminAddDepartment({ name: '  physics  ' }).ok, false, 'Case-insensitive duplicate rejected');
+  const addedDeptRes = adminAddDepartment({
+    name: '  Aerospace Engineering  ',
+    code: 'aero',
+    building: 'Wright Hall',
+    leadFaculty: 'Prof. N. Singh',
+    summary: 'Wind tunnel and avionics testbeds.',
+  });
+  assert.equal(addedDeptRes.ok, true);
+  const aeroId = addedDeptRes.data!.id;
+  assert.equal(addedDeptRes.data!.name, 'Aerospace Engineering');
+  assert.equal(addedDeptRes.data!.code, 'AERO');
+
+  const editedDeptRes = adminEditDepartment(aeroId, {
+    name: 'Aerospace & Flight Systems',
+    code: 'AERO',
+    building: 'Wright Hall',
+    leadFaculty: 'Prof. N. Singh',
+    summary: 'Wind tunnel and avionics.',
+  });
+  assert.equal(editedDeptRes.ok, true);
+  assert.equal(getDepartments().some((d) => d.name === 'Aerospace & Flight Systems'), true);
+
+  // Labs: parent department check + uniqueness within department
+  assert.equal(adminAddLab({ departmentId: 'dept-nope', name: 'Bad Lab' }).ok, false);
+  const addedLabRes = adminAddLab({
+    departmentId: aeroId,
+    name: 'Subsonic Wind Tunnel Lab',
+    room: 'WRT-105',
+    supervisor: 'Dr. A. Diaz',
+    hours: '09:00 – 17:00',
+    description: 'Low-speed aerodynamic test section.',
+  });
+  assert.equal(addedLabRes.ok, true);
+  const aeroLabId = addedLabRes.data!.id;
+  assert.equal(
+    adminAddLab({ departmentId: aeroId, name: 'subsonic wind tunnel lab' }).ok,
+    false,
+    'Duplicate lab name within same department rejected'
+  );
+  assert.equal(
+    adminEditLab(aeroLabId, {
+      departmentId: aeroId,
+      name: 'Subsonic & Avionics Lab',
+      room: 'WRT-105',
+      supervisor: 'Dr. A. Diaz',
+      hours: '09:00 – 17:00',
+      description: 'Updated description.',
+    }).ok,
+    true
+  );
+
+  // Equipment: add, duplicate in same lab rejected, edit, nextFreeSlot derived from slots
+  const addedItemRes = adminAddItem({
+    name: 'Pitot Pressure Rake',
+    departmentId: aeroId,
+    labId: aeroLabId,
+    type: 'Instruments',
+    location: 'WRT-105 · Tunnel Throat',
+    status: 'Available',
+    accessLevel: 'Open',
+    specs: '32-port differential scanner',
+  });
+  assert.equal(addedItemRes.ok, true);
+  const aeroItemId = addedItemRes.data!.id;
+  assert.equal(addedItemRes.data!.nextFreeSlot, 'Unscheduled');
+  assert.equal(
+    adminAddItem({
+      name: 'pitot pressure rake',
+      departmentId: aeroId,
+      labId: aeroLabId,
+      type: 'Instruments',
+      location: 'WRT-105',
+      status: 'Available',
+      accessLevel: 'Open',
+      specs: 'Duplicate',
+    }).ok,
+    false
+  );
+  assert.equal(
+    adminEditItem(aeroItemId, {
+      name: 'Pitot Pressure Rake Mk II',
+      departmentId: aeroId,
+      labId: aeroLabId,
+      type: 'Instruments',
+      location: 'WRT-105 · Bay 1',
+      status: 'Available',
+      accessLevel: 'Needs faculty approval',
+      specs: '32-port calibrated scanner',
+    }).ok,
+    true
+  );
+
+  // Slots: hourly creation, past/Sunday/out-of-hours/overlap rejections, delete free only
+  assert.equal(
+    adminAddSlots({ itemId: aeroItemId, date: '2026-11-20', startTime: '09:00', endTime: '11:00' }).ok,
+    false,
+    'Past date rejected'
+  );
+  assert.equal(
+    adminAddSlots({ itemId: aeroItemId, date: '2026-11-29', startTime: '09:00', endTime: '11:00' }).ok,
+    false,
+    'Sunday rejected'
+  );
+  assert.equal(
+    adminAddSlots({ itemId: aeroItemId, date: '2026-11-27', startTime: '08:00', endTime: '10:00' }).ok,
+    false,
+    'Before 09:00 rejected'
+  );
+  assert.equal(
+    adminAddSlots({ itemId: aeroItemId, date: '2026-11-27', startTime: '15:00', endTime: '18:00' }).ok,
+    false,
+    'After 17:00 rejected'
+  );
+  const addedSlotsRes = adminAddSlots({
+    itemId: aeroItemId,
+    date: '2026-11-27',
+    startTime: '09:00',
+    endTime: '12:00',
+  });
+  assert.equal(addedSlotsRes.ok, true);
+  assert.equal(addedSlotsRes.data!.length, 3, '09:00–12:00 creates 3 one-hour slots');
+  assert.equal(getItemById(aeroItemId)?.nextFreeSlot, '11-27 · 09:00');
+  assert.equal(
+    adminAddSlots({ itemId: aeroItemId, date: '2026-11-27', startTime: '10:00', endTime: '13:00' }).ok,
+    false,
+    'Overlapping slot creation rejected'
+  );
+
+  // Delete free slot works; deleting booked slot directly fails unless cancelAffected
+  const freeSlotToDelete = addedSlotsRes.data![0];
+  assert.equal(adminDeleteSlot(freeSlotToDelete.id).ok, true);
+  const bookedSlotCheck = createCustomBooking({
+    itemId: aeroItemId,
+    date: '2026-11-28',
+    start: '13:00',
+    durationHours: 1,
+    purpose: 'Wind check',
+    bookedBy: 'Maya Lin',
+  })!;
+  assert.equal(adminDeleteSlot(bookedSlotCheck.id).ok, false, 'Booked slot blocked without cancelAffected');
+  assert.equal(adminDeleteSlot(bookedSlotCheck.id, 'cancelAffected').ok, true);
+
+  // Safe Delete rules on department/lab/item with dependents
+  // Create a fresh booking + pending request on aeroItemId
+  createCustomBooking({
+    itemId: aeroItemId,
+    date: '2026-11-28',
+    start: '14:00',
+    durationHours: 1,
+    purpose: 'Active tunnel test',
+    bookedBy: 'Maya Lin',
+  });
+  switchUserRole('student');
+  const depReq = submitAccessRequest({
+    itemIds: [aeroItemId],
+    departmentId: aeroId,
+    project: 'Wingtip Vortex Study',
+    subjectCourse: 'AERO 301',
+    deadline: '2026-12-18',
+    teamSize: 2,
+    hoursNeeded: 4,
+    justification: 'Measuring wake turbulence behind winglet geometry.',
+    trainingConfirmed: false,
+  })!;
+  assert.ok(depReq);
+
+  switchUserRole('faculty');
+  const depsReport = getEntityDependents({ type: 'department', id: aeroId });
+  assert.equal(depsReport.childLabs.length, 1);
+  assert.equal(depsReport.childItems.length, 1);
+  assert.equal(depsReport.activeBookings.length, 1);
+  assert.equal(depsReport.affectedRequests.length, 1);
+
+  assert.equal(adminDeleteDepartment(aeroId).ok, false, 'Must block when dependents exist');
+  assert.equal(adminDeleteDepartment(aeroId, 'cancel').ok, false, 'Cancel leaves data intact');
+  assert.ok(getItemById(aeroItemId), 'Item still exists after cancel');
+
+  const safeDelRes = adminDeleteDepartment(aeroId, 'cancelAffected');
+  assert.equal(safeDelRes.ok, true);
+  assert.equal(getDepartments().some((d) => d.id === aeroId), false);
+  assert.equal(getLabs().some((l) => l.id === aeroLabId), false);
+  assert.equal(getItemById(aeroItemId), undefined);
+  assert.equal(getSlots(aeroItemId).length, 0);
+  const affectedReqAfter = getRequests().find((r) => r.id === depReq.id)!;
+  assert.equal(affectedReqAfter.status, 'Changes requested');
+  assert.equal(affectedReqAfter.itemId, '');
+  assert.equal(affectedReqAfter.departmentId, '');
+  assert.ok(affectedReqAfter.facultyNote.length > 10);
+
+  // Direct pure-module helpers sanity check
+  const pureDeps = getDependents({ type: 'item', id: 'eq-phy-01' }, snapshot);
+  assert.ok(pureDeps.totalCount >= 1);
+  assert.equal(addItem('student', {
+    name: 'X',
+    departmentId: 'dept-physics',
+    labId: 'lab-phy-optics',
+    type: 'Instruments',
+    location: 'Room',
+    status: 'Available',
+    accessLevel: 'Open',
+    specs: 'Specs',
+  }, snapshot).ok, false);
+
   resetLabStore();
 }
 
 runTests();
+
 
