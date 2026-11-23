@@ -291,6 +291,7 @@ export default function App() {
       {currentPage === 'booking' && (
         <SmartBookingPage
           selectedItemId={selectedItemId}
+          currentUser={currentUser}
           onSelectItem={(itemId) => {
             setSelectedItemId(itemId);
             syncHash({

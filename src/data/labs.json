@@ -6,7 +6,8 @@
       "name": "Maya Lin",
       "title": "B.Tech Junior · ECE & Robotics",
       "email": "maya.lin@campus.edu",
-      "departmentId": "dept-ece"
+      "departmentId": "dept-ece",
+      "confirmedTrainingItemIds": ["eq-ece-06"]
     },
     "faculty": {
       "id": "F-104",
@@ -888,6 +889,42 @@
       "hoursNeeded": 4,
       "submittedAt": "2026-11-17",
       "facultyNote": "Specimen curing logs incomplete; resubmit once 28-day moisture records are verified."
+    },
+    {
+      "id": "req-107",
+      "student": "Maya Lin",
+      "studentId": "S-2026-418",
+      "departmentId": "dept-physics",
+      "itemId": "eq-phy-01",
+      "equipmentNeeded": "Ocean Optics HR4000 Spectrometer",
+      "project": "Optical Thin-Film UV-Vis Transmission Check",
+      "deadline": "2026-11-26",
+      "status": "Pending",
+      "teamSize": 3,
+      "hoursNeeded": 2,
+      "submittedAt": "2026-11-22",
+      "facultyNote": "",
+      "preferredDate": "2026-11-24",
+      "preferredStart": "10:00",
+      "preferredDurationHours": 2
+    },
+    {
+      "id": "req-108",
+      "student": "R. Kapoor",
+      "studentId": "S-2026-215",
+      "departmentId": "dept-physics",
+      "itemId": "eq-phy-01",
+      "equipmentNeeded": "Ocean Optics HR4000 Spectrometer",
+      "project": "LED Emission Spectrum Calibration Sweep",
+      "deadline": "2026-12-03",
+      "status": "Pending",
+      "teamSize": 2,
+      "hoursNeeded": 2,
+      "submittedAt": "2026-11-21",
+      "facultyNote": "",
+      "preferredDate": "2026-11-24",
+      "preferredStart": "10:00",
+      "preferredDurationHours": 2
     }
   ]
 }

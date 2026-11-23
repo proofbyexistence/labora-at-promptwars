@@ -50,6 +50,10 @@ export interface TimeSlot {
   booked: boolean;
   bookedBy: string | null;
   note: string;
+  start?: string;
+  end?: string;
+  status?: 'free' | 'booked';
+  requestId?: string | null;
 }
 
 export interface AccessRequest {
@@ -66,6 +70,9 @@ export interface AccessRequest {
   hoursNeeded: number;
   submittedAt: string;
   facultyNote: string;
+  preferredDate?: string;
+  preferredStart?: string;
+  preferredDurationHours?: number;
 }
 
 export interface CampusUser {
@@ -75,6 +82,7 @@ export interface CampusUser {
   title: string;
   email: string;
   departmentId: string;
+  confirmedTrainingItemIds?: string[];
 }
 
 export interface LabDataset {

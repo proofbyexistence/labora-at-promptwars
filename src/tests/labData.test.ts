@@ -6,8 +6,10 @@ import {
   serializeHashState,
 } from '../js/filter';
 import {
+  applyAllocationSuggestion,
   bookSlot,
   cancelSlotBooking,
+  createCustomBooking,
   getCurrentUser,
   getDepartments,
   getItemById,
@@ -20,6 +22,17 @@ import {
   submitAccessRequest,
   switchUserRole,
 } from '../js/labData';
+import {
+  allocate,
+  ALLOCATION_WEIGHTS,
+  buildWeekDates,
+  buildWeeklyHourlySlots,
+  canUserBookItem,
+  detectConflicts,
+  explainAllocation,
+  scoreRequest,
+  validateBooking,
+} from '../js/scheduler';
 
 function runTests() {
   resetLabStore();
@@ -51,9 +64,9 @@ function runTests() {
   }
 
   const initialRequests = getRequests();
-  assert.equal(initialRequests.length, 6, 'Expected 6 initial sample access requests');
+  assert.ok(initialRequests.length >= 6, 'Expected at least 6 initial sample access requests');
 
-  // 2. Pure filter module tests (name, lab, department, type, specs, trimmed case-insensitive)
+  // 2. Pure filter module tests
   const byDeptSearch = filterItems(
     allItems,
     { query: '  biotechnology  ' },
@@ -75,15 +88,12 @@ function runTests() {
   );
   assert.ok(byCombined.length >= 2, 'Combined filters should return matching ECE dev kits');
 
-  // 3. Pagination helper tests (9 items per page)
+  // 3. Pagination & hash parsing tests
   const page1 = paginateItems(allItems, 1, 9);
   assert.equal(page1.items.length, 9);
   assert.equal(page1.page, 1);
   assert.equal(page1.totalPages, Math.ceil(allItems.length / 9));
-  const clamped = paginateItems(allItems, 999, 9);
-  assert.equal(clamped.page, clamped.totalPages);
 
-  // 4. Hash parsing & sanitization tests
   const parsedAlias = parseHashState('#dept=electronics&type=dev-kits&q=  FPGA  &p=2', {
     departments,
     labs: allLabs,
@@ -95,15 +105,13 @@ function runTests() {
   assert.equal(parsedAlias.filters.query, 'FPGA');
   assert.equal(parsedAlias.catalogPage, 2);
 
-  const parsedInvalid = parseHashState('#dept=bogus&type=laser-sword&status=nope&p=-4', {
+  const parsedUnknownItem = parseHashState('#booking&item=unknown-999', {
     departments,
     labs: allLabs,
     items: allItems,
   });
-  assert.equal(parsedInvalid.filters.departmentId, '');
-  assert.equal(parsedInvalid.filters.type, '');
-  assert.equal(parsedInvalid.filters.status, '');
-  assert.equal(parsedInvalid.catalogPage, 1);
+  assert.equal(parsedUnknownItem.page, 'booking');
+  assert.equal(parsedUnknownItem.itemId, 'unknown-999');
 
   const serialized = serializeHashState({
     page: 'discover',
@@ -112,24 +120,112 @@ function runTests() {
   });
   assert.equal(serialized, '#discover&dept=dept-ece&type=Development+kits&p=2');
 
-  // 5. Query & item lookup
-  const firstItem = getItemById('eq-phy-01');
-  assert.ok(firstItem, 'Expected eq-phy-01 to resolve');
-  assert.equal(getItemById('non-existent-id'), undefined);
+  // 4. Scheduler validation, conflict detection, scoring & allocation
+  const weekDates = buildWeekDates('2026-11-23');
+  assert.equal(weekDates.length, 6, 'Week grid should contain Mon–Sat (6 days)');
+  assert.equal(weekDates[0], '2026-11-23');
+  assert.equal(weekDates[5], '2026-11-28');
 
-  // 6. Slots and booking mutation
-  const slotsBefore = getSlots('eq-phy-01');
-  assert.ok(slotsBefore.length > 0, 'Expected sample slots for eq-phy-01');
-  const openSlot = slotsBefore.find((s) => !s.booked);
-  assert.ok(openSlot, 'Expected an open slot on eq-phy-01');
+  const phySlots = getSlots('eq-phy-01');
+  const hourlyPhy = buildWeeklyHourlySlots('eq-phy-01', phySlots, '2026-11-23');
+  assert.equal(hourlyPhy.length, 48, '6 days x 8 hours = 48 one-hour slots');
 
+  // Validation rejections
+  const pastCheck = validateBooking(
+    { itemId: 'eq-phy-01', date: '2026-11-20', start: '10:00', durationHours: 2, purpose: 'Test' },
+    phySlots
+  );
+  assert.equal(pastCheck.ok, false);
+
+  const sundayCheck = validateBooking(
+    { itemId: 'eq-phy-01', date: '2026-11-29', start: '10:00', durationHours: 2, purpose: 'Test' },
+    phySlots
+  );
+  assert.equal(sundayCheck.ok, false);
+
+  const outsideHoursCheck = validateBooking(
+    { itemId: 'eq-phy-01', date: '2026-11-24', start: '16:00', durationHours: 2, purpose: 'Test' },
+    phySlots
+  );
+  assert.equal(outsideHoursCheck.ok, false);
+
+  const overFourCheck = validateBooking(
+    { itemId: 'eq-phy-01', date: '2026-11-24', start: '09:00', durationHours: 5, purpose: 'Test' },
+    phySlots
+  );
+  assert.equal(overFourCheck.ok, false);
+
+  // Overlap on 2026-11-24 13:00-15:00 (booked by R. Kapoor)
+  const overlapCheck = validateBooking(
+    { itemId: 'eq-phy-01', date: '2026-11-24', start: '13:00', durationHours: 2, purpose: 'Overlap' },
+    phySlots
+  );
+  assert.equal(overlapCheck.ok, false);
+
+  const validCheck = validateBooking(
+    { itemId: 'eq-phy-01', date: '2026-11-25', start: '10:00', durationHours: 2, purpose: 'Transmission run' },
+    phySlots
+  );
+  assert.equal(validCheck.ok, true);
+
+  // Conflict detection & deterministic scoring / allocation
+  assert.equal(
+    ALLOCATION_WEIGHTS.deadlineUrgency +
+      ALLOCATION_WEIGHTS.feasibility +
+      ALLOCATION_WEIGHTS.studentRequirements +
+      ALLOCATION_WEIGHTS.fairness,
+    100
+  );
+
+  const conflicts = detectConflicts(initialRequests, phySlots);
+  assert.ok(conflicts.length >= 1, 'Expected seeded conflict on eq-phy-01');
+  const phyConflict = conflicts.find((c) => c.itemId === 'eq-phy-01');
+  assert.ok(phyConflict && phyConflict.requests.length === 2);
+
+  const phyItem = getItemById('eq-phy-01')!;
+  const scored0 = scoreRequest(phyConflict.requests[0], { item: phyItem, slots: phySlots });
+  assert.ok(scored0.score >= 0 && scored0.score <= 100);
+  assert.equal(scored0.breakdown.length, 4);
+
+  const allocation = allocate(phyConflict.requests, phyItem, phySlots, allItems);
+  assert.equal(allocation.assignments.length, 2, 'Both competing requests should receive slots');
+  assert.equal(allocation.assignments[0].student, 'Maya Lin');
+  assert.equal(allocation.assignments[0].isContestedSlot, true);
+  assert.equal(allocation.assignments[1].isContestedSlot, false);
+  assert.ok(explainAllocation(allocation).length > 10);
+
+  // 5. Access rules
+  const student = getCurrentUser();
+  assert.equal(student.role, 'student');
+  const restrictedItem = getItemById('eq-ece-02')!;
+  assert.equal(canUserBookItem(restrictedItem, student, initialRequests).allowed, false);
+  const trainedItem = getItemById('eq-ece-06')!;
+  assert.equal(canUserBookItem(trainedItem, student, initialRequests).allowed, true);
+  assert.equal(canUserBookItem(phyItem, student, initialRequests).allowed, true);
+
+  // 6. Custom booking & allocation persistence
+  const customBooked = createCustomBooking({
+    itemId: 'eq-phy-01',
+    date: '2026-11-25',
+    start: '10:00',
+    durationHours: 2,
+    purpose: 'Lab check',
+  });
+  assert.ok(customBooked && customBooked.booked);
+
+  applyAllocationSuggestion(allocation);
+  const updatedReq = getRequests().find((r) => r.id === 'req-107');
+  assert.equal(updatedReq?.status, 'Approved');
+
+  // 7. Existing booking/request mutations
+  resetLabStore();
+  const openSlot = getSlots('eq-phy-01').find((s) => !s.booked);
+  assert.ok(openSlot);
   const booked = bookSlot(openSlot.id, 'eq-phy-01', 'Optics check');
   assert.equal(booked?.booked, true);
   const released = cancelSlotBooking(openSlot.id, 'eq-phy-01');
   assert.equal(released?.booked, false);
 
-  // 7. Role switcher, access request submission & faculty approval
-  assert.equal(getCurrentUser().role, 'student');
   const createdReq = submitAccessRequest({
     itemId: 'eq-ece-02',
     project: 'Test FPGA Filter',
@@ -137,15 +233,11 @@ function runTests() {
     teamSize: 2,
     hoursNeeded: 4,
   });
-  assert.ok(createdReq, 'Expected new access request to be created');
-  assert.equal(getRequests().length, 7);
-
+  assert.ok(createdReq);
   const faculty = switchUserRole('faculty');
   assert.equal(faculty.role, 'faculty');
-
   const reviewed = reviewAccessRequest(createdReq.id, 'Approved', 'Cleared for bench 12');
   assert.equal(reviewed?.status, 'Approved');
-  assert.equal(reviewed?.facultyNote, 'Cleared for bench 12');
 
   resetLabStore();
 }

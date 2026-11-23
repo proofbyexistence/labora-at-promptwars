@@ -268,8 +268,12 @@ export function parseHashState(
   const rawPageNum = Number.parseInt(params.get('p') ?? '1', 10);
   const catalogPage = Number.isFinite(rawPageNum) && rawPageNum > 0 ? rawPageNum : 1;
 
-  const rawItem = (params.get('item') ?? '').trim();
-  const itemId = validItemIds.has(rawItem) ? rawItem : valid.items[0]?.id ?? '';
+  const rawItem = (params.get('item') ?? '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 40);
+  const itemId = rawItem
+    ? validItemIds.has(rawItem) || page === 'booking'
+      ? rawItem
+      : valid.items[0]?.id ?? ''
+    : valid.items[0]?.id ?? '';
 
   return {
     page,

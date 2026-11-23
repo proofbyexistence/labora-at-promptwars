@@ -1,20 +1,49 @@
-import { useState } from 'react';
-import { Calendar, CheckCircle2, Clock, ShieldAlert } from 'lucide-react';
-import type { PageId } from '../components/EquipmentCard';
-import { EquipmentDoodle } from '../components/LabDoodles';
+import { useRef, useState, type FormEvent } from 'react';
 import {
-  bookSlot,
+  AlertTriangle,
+  Calendar,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Compass,
+  Lock,
+  Pin,
+  ShieldAlert,
+  Sparkles,
+  XCircle,
+} from 'lucide-react';
+import type { PageId } from '../components/EquipmentCard';
+import { EquipmentDoodle, HeroBenchDoodle } from '../components/LabDoodles';
+import {
+  applyAllocationSuggestion,
   cancelSlotBooking,
+  createCustomBooking,
   getDepartments,
   getItemById,
   getItems,
   getLabs,
+  getRequests,
   getSlots,
 } from '../js/labData';
-import type { TimeSlot } from '../js/types';
+import {
+  allocate,
+  buildWeekDates,
+  buildWeeklyHourlySlots,
+  canUserBookItem,
+  DEFAULT_REFERENCE_DATE,
+  detectConflicts,
+  explainAllocation,
+  formatHour,
+  LAB_END_HOUR,
+  LAB_START_HOUR,
+  parseHour,
+  validateBooking,
+} from '../js/scheduler';
+import type { CampusUser, EquipmentItem } from '../js/types';
 
 interface SmartBookingPageProps {
   selectedItemId: string;
+  currentUser: CampusUser;
   onSelectItem: (itemId: string) => void;
   onNavigate: (
     page: PageId,
@@ -23,60 +52,219 @@ interface SmartBookingPageProps {
   onDataMutated: () => void;
 }
 
+const STATUS_BADGE_META: Record<
+  EquipmentItem['status'],
+  { className: string; Icon: typeof CheckCircle2 }
+> = {
+  Available: { className: 'status-badge status-badge-available', Icon: CheckCircle2 },
+  Limited: { className: 'status-badge status-badge-limited', Icon: AlertTriangle },
+  Booked: { className: 'status-badge status-badge-booked', Icon: XCircle },
+};
+
+const START_HOURS = Array.from(
+  { length: LAB_END_HOUR - LAB_START_HOUR },
+  (_, idx) => LAB_START_HOUR + idx
+);
+
+function shiftIsoDate(dateStr: string, offsetDays: number): string {
+  const [y, m, d] = dateStr.split('-').map((n) => Number.parseInt(n, 10));
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + offsetDays);
+  return dt.toISOString().slice(0, 10);
+}
+
+function formatDayHeader(isoDate: string): { weekday: string; shortDate: string } {
+  const [y, m, d] = isoDate.split('-').map((n) => Number.parseInt(n, 10));
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const weekday = dt.toLocaleDateString('en-US', {
+    weekday: 'short',
+    timeZone: 'UTC',
+  });
+  const shortDate = dt.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+  return { weekday, shortDate };
+}
+
+function formatFullDayHourLabel(isoDate: string, hour: number, stateLabel: string): string {
+  const [y, m, d] = isoDate.split('-').map((n) => Number.parseInt(n, 10));
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const fullDay = dt.toLocaleDateString('en-US', {
+    weekday: 'long',
+    timeZone: 'UTC',
+  });
+  const suffix = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour > 12 ? hour - 12 : hour;
+  return `${fullDay} ${hour12} ${suffix}, ${stateLabel}`;
+}
+
 export function SmartBookingPage({
   selectedItemId,
+  currentUser,
   onSelectItem,
   onNavigate,
   onDataMutated,
 }: SmartBookingPageProps) {
-  const [sessionNote, setSessionNote] = useState('');
-  const [feedback, setFeedback] = useState<string>('');
+  const [weekAnchor, setWeekAnchor] = useState(DEFAULT_REFERENCE_DATE);
+  const [bookingDate, setBookingDate] = useState(DEFAULT_REFERENCE_DATE);
+  const [bookingStart, setBookingStart] = useState('14:00');
+  const [durationHours, setDurationHours] = useState(1);
+  const [purpose, setPurpose] = useState('');
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [liveMessage, setLiveMessage] = useState('');
+
+  const calendarSectionRef = useRef<HTMLElement | null>(null);
+  const firstCalendarSlotRef = useRef<HTMLButtonElement | null>(null);
 
   const allItems = getItems();
   const departments = getDepartments();
   const labs = getLabs();
+  const allRequests = getRequests();
   const deptMap = new Map(departments.map((d) => [d.id, d.name]));
   const labMap = new Map(labs.map((l) => [l.id, l]));
 
-  const currentItem = getItemById(selectedItemId) ?? allItems[0];
-  const slots = currentItem ? getSlots(currentItem.id) : [];
+  const currentItem = selectedItemId ? getItemById(selectedItemId) : allItems[0];
 
-  // Group slots by calendar date for clear notebook schedule layout.
-  const groupedSlots = slots.reduce<Record<string, TimeSlot[]>>((acc, slot) => {
-    if (!acc[slot.date]) {
-      acc[slot.date] = [];
-    }
-    acc[slot.date].push(slot);
-    return acc;
-  }, {});
-
-  const handleBook = (slotId: string) => {
-    if (!currentItem) return;
-    const booked = bookSlot(slotId, currentItem.id, sessionNote);
-    if (booked) {
-      setFeedback(`Reserved ${booked.date} (${booked.window}) for ${currentItem.name}.`);
-      setSessionNote('');
-      onDataMutated();
-    }
-  };
-
-  const handleRelease = (slotId: string) => {
-    if (!currentItem) return;
-    const released = cancelSlotBooking(slotId, currentItem.id);
-    if (released) {
-      setFeedback(`Released slot ${released.date} (${released.window}).`);
-      onDataMutated();
-    }
-  };
-
+  // Empty state for unknown item IDs from URL hash.
   if (!currentItem) {
-    return null;
+    return (
+      <section className="notebook-sheet p-8 text-center">
+        <HeroBenchDoodle className="mx-auto mb-4 h-36 w-auto" />
+        <h1 className="text-3xl font-bold text-[var(--ink)]">
+          Equipment item not found
+        </h1>
+        <p className="mt-2 text-base text-[var(--ink)]">
+          We could not find an instrument matching &ldquo;{selectedItemId}&rdquo; in the campus notebook.
+        </p>
+        <button
+          type="button"
+          onClick={() => onNavigate('discover', { departmentId: '', labId: '' })}
+          className="labora-btn mt-5"
+        >
+          <Compass className="h-4 w-4 shrink-0" aria-hidden="true" />
+          Back to Discover
+        </button>
+      </section>
+    );
   }
 
   const currentLab = labMap.get(currentItem.labId);
+  const rawSlots = getSlots(currentItem.id);
+  const weekDates = buildWeekDates(weekAnchor);
+  const weeklySlots = buildWeeklyHourlySlots(currentItem.id, rawSlots, weekAnchor);
+
+  const itemStatusMeta = STATUS_BADGE_META[currentItem.status];
+  const ItemStatusIcon = itemStatusMeta.Icon;
+
+  const accessCheck = canUserBookItem(currentItem, currentUser, allRequests);
+
+  const allConflicts = detectConflicts(allRequests, rawSlots);
+  const itemConflicts = allConflicts.filter((c) => c.itemId === currentItem.id);
+
+  // Build quick lookup of conflicting slot keys for calendar highlighting.
+  const conflictSlotKeys = new Set<string>();
+  for (const conflict of itemConflicts) {
+    const startH = parseHour(conflict.start);
+    const endH = parseHour(conflict.end);
+    for (let h = startH; h < endH; h += 1) {
+      conflictSlotKeys.add(`${conflict.date}|${formatHour(h)}`);
+    }
+  }
+
+  // Highlight user's current pick across the chosen duration span.
+  const pickedSlotKeys = new Set<string>();
+  const pickedStartHour = parseHour(bookingStart);
+  if (Number.isFinite(pickedStartHour)) {
+    for (let offset = 0; offset < durationHours; offset += 1) {
+      pickedSlotKeys.add(`${bookingDate}|${formatHour(pickedStartHour + offset)}`);
+    }
+  }
+
+  const slotLookup = new Map(weeklySlots.map((s) => [`${s.date}|${s.start}`, s]));
+  const activeWeekBookings = rawSlots.filter(
+    (s) => s.booked && weekDates.includes(s.date)
+  );
+
+  const primaryConflict = itemConflicts[0];
+  const allocationResult = primaryConflict
+    ? allocate(primaryConflict.requests, currentItem, rawSlots, allItems)
+    : null;
+  const allocationExplanation = allocationResult
+    ? explainAllocation(allocationResult)
+    : '';
+
+  const handleSelectCalendarSlot = (date: string, start: string) => {
+    setBookingDate(date);
+    setBookingStart(start);
+    setValidationErrors([]);
+    setLiveMessage(`Selected ${date} at ${start} in booking form.`);
+  };
+
+  const handleBookingSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    setLiveMessage('');
+
+    const check = validateBooking(
+      {
+        itemId: currentItem.id,
+        date: bookingDate,
+        start: bookingStart,
+        durationHours,
+        purpose,
+      },
+      rawSlots
+    );
+
+    if (!check.ok) {
+      setValidationErrors(check.errors);
+      return;
+    }
+
+    const created = createCustomBooking({
+      itemId: currentItem.id,
+      date: bookingDate,
+      start: bookingStart,
+      durationHours,
+      purpose,
+    });
+
+    if (created) {
+      setValidationErrors([]);
+      setPurpose('');
+      setLiveMessage(
+        `Booked ${currentItem.name} on ${created.date} (${created.window}) for "${created.note}".`
+      );
+      onDataMutated();
+    }
+  };
+
+  const handleReleaseSlot = (slotId: string, windowLabel: string, date: string) => {
+    const released = cancelSlotBooking(slotId, currentItem.id);
+    if (released) {
+      setLiveMessage(`Released booking for ${date} (${windowLabel}).`);
+      onDataMutated();
+    }
+  };
+
+  const handleAcceptSuggestion = () => {
+    if (!allocationResult) return;
+    applyAllocationSuggestion(allocationResult);
+    setLiveMessage(
+      `Applied fair-allocation schedule for ${currentItem.name}. ${allocationResult.assignments.length} session(s) updated.`
+    );
+    onDataMutated();
+  };
+
+  const handlePickAnotherSlot = () => {
+    firstCalendarSlotRef.current?.focus();
+    calendarSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  };
 
   return (
     <div className="space-y-6">
+      {/* Item Summary Card & Equipment Picker */}
       <section className="notebook-sheet p-6">
         <div className="flex flex-wrap items-start justify-between gap-4 border-b-2 border-[var(--ink)] pb-5">
           <div>
@@ -84,25 +272,26 @@ export function SmartBookingPage({
               Smart Booking
             </h1>
             <p className="mt-1 text-base text-[var(--ink)]">
-              Pick an equipment item and reserve an open bench window. Changes save directly to your local notebook session.
+              Inspect weekly Mon–Sat lab availability (09:00–17:00), reserve a session, or resolve competing requests.
             </p>
           </div>
 
           <div className="w-full sm:w-80">
             <label
               htmlFor="booking-item-select"
-              className="block text-base font-bold text-[var(--ink)]"
+              className="mb-1 block text-sm font-bold text-[var(--ink)]"
             >
-              Selected Equipment
+              Equipment Item
             </label>
             <select
               id="booking-item-select"
               value={currentItem.id}
               onChange={(e) => {
-                setFeedback('');
+                setValidationErrors([]);
+                setLiveMessage('');
                 onSelectItem(e.target.value);
               }}
-              className="notebook-input mt-1"
+              className="notebook-input"
             >
               {departments.map((dept) => (
                 <optgroup key={dept.id} label={dept.name}>
@@ -119,165 +308,573 @@ export function SmartBookingPage({
           </div>
         </div>
 
-        {/* Selected Instrument Brief */}
         <div className="mt-5 grid grid-cols-1 gap-6 lg:grid-cols-12">
-          <div className="lg:col-span-5">
-            <div className="flex flex-col items-center justify-center rounded-[12px] border-2 border-[var(--ink)] bg-[var(--paper)] p-6 text-center">
-              <EquipmentDoodle
-                type={currentItem.type}
-                departmentId={currentItem.departmentId}
-                className="h-28 w-28"
-              />
-              <div className="mt-2 font-heading text-2xl font-bold text-[var(--ink)]">
-                {currentItem.name}
-              </div>
-              <div className="text-sm text-[var(--ink)]">{currentItem.type}</div>
+          <div className="flex flex-col items-center justify-center rounded-[12px] border-2 border-[var(--ink)] bg-[var(--paper)] p-5 text-center lg:col-span-4">
+            <EquipmentDoodle
+              type={currentItem.type}
+              departmentId={currentItem.departmentId}
+              className="h-24 w-24"
+            />
+            <h2 className="mt-2 text-2xl font-bold text-[var(--ink)]">
+              {currentItem.name}
+            </h2>
+            <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+              <span className={itemStatusMeta.className}>
+                <ItemStatusIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>{currentItem.status}</span>
+              </span>
+              <span className="rounded-[8px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-2.5 py-0.5 text-sm font-bold text-[var(--ink)]">
+                {currentItem.accessLevel}
+              </span>
             </div>
-
-            <div className="mt-4 space-y-2 text-base">
-              <div className="flex items-center justify-between border-b border-[var(--ink)]/25 pb-2">
-                <span className="font-bold text-[var(--ink)]">Department</span>
-                <span className="text-[var(--ink)]">
-                  {deptMap.get(currentItem.departmentId)}
-                </span>
-              </div>
-              <div className="flex items-center justify-between border-b border-[var(--ink)]/25 pb-2">
-                <span className="font-bold text-[var(--ink)]">Laboratory</span>
-                <span className="tabular-nums text-[var(--ink)]">
-                  {currentLab?.name} ({currentLab?.room})
-                </span>
-              </div>
-              <div className="flex items-center justify-between border-b border-[var(--ink)]/25 pb-2">
-                <span className="font-bold text-[var(--ink)]">Supervisor</span>
-                <span className="text-[var(--ink)]">{currentLab?.supervisor}</span>
-              </div>
-              <div className="flex items-center justify-between border-b border-[var(--ink)]/25 pb-2">
-                <span className="font-bold text-[var(--ink)]">Access Level</span>
-                <span className="text-[var(--ink)]">
-                  {currentItem.accessLevel}
-                </span>
-              </div>
-              <p className="pt-1 text-base leading-relaxed text-[var(--ink)]">
-                {currentItem.specs}
-              </p>
-            </div>
-
-            {currentItem.accessLevel !== 'Open' && (
-              <div className="mt-4 rounded-[10px] border-2 border-[var(--ink)] bg-[var(--status-limited-bg)] p-4 text-base text-[var(--ink)]">
-                <div className="flex items-start gap-2.5">
-                  <ShieldAlert className="mt-1 h-5 w-5 shrink-0 text-[var(--ink)]" aria-hidden="true" />
-                  <div>
-                    <p className="font-bold">
-                      {currentItem.accessLevel}
-                    </p>
-                    <p className="mt-1 text-sm text-[var(--ink)]">
-                      Submit a formal access request if you have not yet been cleared by {currentLab?.supervisor}.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => onNavigate('request', { itemId: currentItem.id })}
-                      className="labora-btn labora-btn-paper mt-3 text-sm"
-                    >
-                      Open Request Access form
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
 
-          {/* Slot Calendar & Booking Action */}
-          <div className="lg:col-span-7">
-            <div className="mb-4">
-              <label
-                htmlFor="booking-note"
-                className="block text-base font-bold text-[var(--ink)]"
-              >
-                Experiment / Session Note (optional)
-              </label>
-              <input
-                id="booking-note"
-                type="text"
-                value={sessionNote}
-                onChange={(e) => setSessionNote(e.target.value)}
-                placeholder="e.g., Baseline calibration run for Senior Design Lab"
-                className="notebook-input mt-1"
-              />
-            </div>
-
-            {feedback && (
-              <div
-                role="status"
-                className="mb-4 flex items-center gap-2 rounded-[10px] border-2 border-[var(--ink)] bg-[var(--status-available-bg)] px-3.5 py-2.5 text-base font-bold text-[var(--ink)]"
-              >
-                <CheckCircle2 className="h-5 w-5 shrink-0" aria-hidden="true" />
-                <span>{feedback}</span>
+          <div className="space-y-2.5 text-base lg:col-span-8">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="rounded-[10px] border-2 border-[var(--ink)] bg-[var(--paper)] px-3.5 py-2">
+                <div className="text-xs font-bold text-[var(--ink)]">Department</div>
+                <div>{deptMap.get(currentItem.departmentId)}</div>
               </div>
-            )}
-
-            <div className="space-y-5">
-              {Object.entries(groupedSlots).map(([date, daySlots]) => (
-                <div key={date} className="rounded-[12px] border-2 border-[var(--ink)] bg-[var(--paper)] p-4">
-                  <div className="mb-3 flex items-center gap-2 border-b-2 border-[var(--ink)] pb-2 text-lg font-bold text-[var(--ink)]">
-                    <Calendar className="h-4 w-4" aria-hidden="true" />
-                    <span className="tabular-nums">{date}</span>
-                  </div>
-
-                  <ul className="space-y-2.5">
-                    {daySlots.map((slot) => (
-                      <li
-                        key={slot.id}
-                        className="flex flex-wrap items-center justify-between gap-3 rounded-[10px] border-2 border-[var(--ink)] bg-[var(--white)] px-3.5 py-3"
-                      >
-                        <div>
-                          <div className="flex items-center gap-2 text-base font-bold text-[var(--ink)]">
-                            <Clock className="h-4 w-4" aria-hidden="true" />
-                            <span className="tabular-nums">{slot.window}</span>
-                            <span className="text-sm font-normal">
-                              ({slot.durationHours}h)
-                            </span>
-                          </div>
-                          {slot.booked ? (
-                            <p className="mt-1 text-sm text-[var(--ink)]">
-                              Reserved by <strong>{slot.bookedBy}</strong>
-                              {slot.note ? ` · ${slot.note}` : ''}
-                            </p>
-                          ) : (
-                            <p className="mt-1">
-                              <span className="status-badge status-badge-available text-sm">
-                                <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-                                <span>Open for booking</span>
-                              </span>
-                            </p>
-                          )}
-                        </div>
-
-                        {slot.booked ? (
-                          <button
-                            type="button"
-                            onClick={() => handleRelease(slot.id)}
-                            className="labora-btn labora-btn-paper text-sm"
-                          >
-                            Release Slot
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => handleBook(slot.id)}
-                            className="labora-btn text-sm"
-                          >
-                            Reserve Window
-                          </button>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
+              <div className="rounded-[10px] border-2 border-[var(--ink)] bg-[var(--paper)] px-3.5 py-2">
+                <div className="text-xs font-bold text-[var(--ink)]">Laboratory & Room</div>
+                <div className="tabular-nums">
+                  {currentLab?.name} ({currentLab?.room})
                 </div>
-              ))}
+              </div>
+              <div className="rounded-[10px] border-2 border-[var(--ink)] bg-[var(--paper)] px-3.5 py-2">
+                <div className="text-xs font-bold text-[var(--ink)]">Supervisor</div>
+                <div>{currentLab?.supervisor}</div>
+              </div>
+              <div className="rounded-[10px] border-2 border-[var(--ink)] bg-[var(--paper)] px-3.5 py-2">
+                <div className="text-xs font-bold text-[var(--ink)]">Next Free Slot</div>
+                <div className="tabular-nums">{currentItem.nextFreeSlot}</div>
+              </div>
             </div>
+            <p className="rounded-[10px] border-2 border-[var(--ink)] bg-[var(--paper)] px-3.5 py-2.5 text-base text-[var(--ink)]">
+              <strong className="mr-1.5">Specs:</strong>
+              {currentItem.specs}
+            </p>
           </div>
         </div>
       </section>
+
+      {/* Polite live region for booking & allocation announcements */}
+      <div
+        aria-live="polite"
+        className={
+          liveMessage
+            ? 'notebook-sheet flex items-center gap-2 bg-[var(--status-available-bg)] px-4 py-3 text-base font-bold text-[var(--ink)]'
+            : 'sr-only'
+        }
+      >
+        {liveMessage && (
+          <>
+            <CheckCircle2 className="h-5 w-5 shrink-0" aria-hidden="true" />
+            <span>{liveMessage}</span>
+          </>
+        )}
+      </div>
+
+      {/* Conflict Panel + AI Fair-Allocation Recommendation */}
+      {primaryConflict && allocationResult && (
+        <section
+          aria-labelledby="conflict-panel-heading"
+          className="grid grid-cols-1 gap-6 xl:grid-cols-12"
+        >
+          {/* Conflict Panel */}
+          <div className="notebook-sheet notebook-sheet-alt-tape p-5 xl:col-span-5">
+            <div className="flex items-center gap-2 border-b-2 border-[var(--ink)] pb-3">
+              <AlertTriangle className="h-5 w-5 shrink-0 text-[var(--ink)]" aria-hidden="true" />
+              <h2 id="conflict-panel-heading" className="text-2xl font-bold text-[var(--ink)]">
+                Competing Requests Detected
+              </h2>
+            </div>
+
+            <p className="mt-2.5 text-base text-[var(--ink)]">
+              Contested window: <strong className="tabular-nums">{primaryConflict.date} · {primaryConflict.start}–{primaryConflict.end}</strong>
+            </p>
+
+            <ul className="mt-4 space-y-3">
+              {primaryConflict.requests.map((req) => (
+                <li
+                  key={req.id}
+                  className="rounded-[10px] border-2 border-[var(--ink)] bg-[var(--paper)] p-3.5"
+                >
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="font-bold text-[var(--ink)]">{req.student}</span>
+                    <span className="status-badge status-badge-limited text-sm">
+                      <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span>Conflict</span>
+                    </span>
+                  </div>
+                  <div className="mt-1 text-base font-bold text-[var(--ink)]">
+                    {req.project}
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-sm tabular-nums text-[var(--ink)]">
+                    <span>Deadline: {req.deadline}</span>
+                    <span>Hours: {req.hoursNeeded}h</span>
+                    <span>Team: {req.teamSize}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* AI Fair-Allocation Recommendation Card */}
+          <div className="notebook-sheet p-5 xl:col-span-7">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b-2 border-[var(--ink)] pb-3">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 shrink-0 text-[var(--ink)]" aria-hidden="true" />
+                <h2 className="text-2xl font-bold text-[var(--ink)]">
+                  Fair-Allocation Recommendation
+                </h2>
+              </div>
+              <span className="rounded-[8px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-2.5 py-0.5 text-sm font-bold text-[var(--ink)]">
+                Deterministic Priority Score
+              </span>
+            </div>
+
+            <p className="mt-3 rounded-[10px] border-2 border-[var(--ink)] bg-[var(--paper)] p-3.5 text-base text-[var(--ink)]">
+              {allocationExplanation}
+            </p>
+
+            <ul className="mt-4 space-y-3">
+              {allocationResult.ranked.map((entry, idx) => {
+                const isFeasible = allocationResult.feasible[entry.request.id];
+                const assignment = allocationResult.assignments.find(
+                  (a) => a.requestId === entry.request.id
+                );
+
+                return (
+                  <li
+                    key={entry.request.id}
+                    className="rounded-[10px] border-2 border-[var(--ink)] bg-[var(--white)] p-3.5"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-lg font-bold text-[var(--ink)]">
+                        #{idx + 1} · {entry.request.student}
+                        <span className="ml-2 rounded-[8px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-2 py-0.5 text-sm tabular-nums">
+                          {entry.score} / 100
+                        </span>
+                      </div>
+
+                      <span
+                        className={
+                          isFeasible
+                            ? 'status-badge status-badge-available text-sm'
+                            : 'status-badge status-badge-booked text-sm'
+                        }
+                      >
+                        {isFeasible ? (
+                          <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                        ) : (
+                          <XCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                        )}
+                        <span>
+                          Feasible before deadline: {isFeasible ? 'Yes' : 'No'}
+                        </span>
+                      </span>
+                    </div>
+
+                    {assignment && (
+                      <p className="mt-1.5 text-sm font-bold text-[var(--ink)] tabular-nums">
+                        Suggested window: {assignment.date} · {assignment.start}–{assignment.end}
+                        {assignment.isContestedSlot ? ' (contested slot)' : ' (earliest free slot)'}
+                      </p>
+                    )}
+
+                    <div className="mt-2 grid grid-cols-1 gap-1.5 text-sm sm:grid-cols-2">
+                      {entry.breakdown.map((factor) => (
+                        <div
+                          key={factor.factor}
+                          className="rounded-[8px] border border-[var(--ink)]/40 bg-[var(--paper)] px-2.5 py-1.5"
+                        >
+                          <div className="flex items-center justify-between font-bold tabular-nums">
+                            <span>{factor.factor}</span>
+                            <span>
+                              {factor.points}/{factor.maxPoints}
+                            </span>
+                          </div>
+                          <div className="text-xs text-[var(--ink)]">{factor.reason}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+
+            {allocationResult.alternatives.length > 0 && (
+              <div className="mt-4 space-y-2">
+                {allocationResult.alternatives.map((alt) => (
+                  <div
+                    key={alt.requestId}
+                    className="flex flex-wrap items-center justify-between gap-3 rounded-[10px] border-2 border-[var(--ink)] bg-[var(--lavender-soft)] p-3.5 text-sm text-[var(--ink)]"
+                  >
+                    <div>
+                      <div className="font-bold">
+                        Alternative Equipment for {alt.student}: {alt.suggestedItemName}
+                      </div>
+                      <div>{alt.reason}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onSelectItem(alt.suggestedItemId)}
+                      className="labora-btn labora-btn-paper text-sm"
+                    >
+                      Inspect Alternative
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="mt-5 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleAcceptSuggestion}
+                className="labora-btn"
+              >
+                <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                Accept suggestion
+              </button>
+
+              <button
+                type="button"
+                onClick={handlePickAnotherSlot}
+                className="labora-btn labora-btn-paper"
+              >
+                <Calendar className="h-4 w-4 shrink-0" aria-hidden="true" />
+                Pick another slot
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Weekly Calendar + Access-Gated Booking Form */}
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+        {/* Weekly Mon–Sat 09:00–17:00 Calendar */}
+        <section
+          ref={calendarSectionRef}
+          aria-labelledby="weekly-calendar-heading"
+          className="notebook-sheet p-5 xl:col-span-7"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b-2 border-[var(--ink)] pb-4">
+            <div>
+              <h2 id="weekly-calendar-heading" className="text-2xl font-bold text-[var(--ink)]">
+                Weekly Lab Schedule
+              </h2>
+              <p className="text-sm tabular-nums text-[var(--ink)]">
+                Week of {weekDates[0]} to {weekDates[5]} · Mon–Sat, 09:00–17:00
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setWeekAnchor((prev) => shiftIsoDate(prev, -7))}
+                className="labora-btn labora-btn-paper !px-3 text-sm"
+                aria-label="Previous week"
+              >
+                <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+                Prev
+              </button>
+              <button
+                type="button"
+                onClick={() => setWeekAnchor((prev) => shiftIsoDate(prev, 7))}
+                className="labora-btn labora-btn-paper !px-3 text-sm"
+                aria-label="Next week"
+              >
+                Next
+                <ChevronRight className="h-4 w-4" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+
+          {/* Legend with icon + text (never color alone) */}
+          <div
+            aria-label="Slot status legend"
+            className="mt-3 flex flex-wrap items-center gap-2.5 text-sm"
+          >
+            <span className="status-badge bg-[var(--white)]">
+              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Free</span>
+            </span>
+            <span className="status-badge status-badge-booked">
+              <Lock className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Booked</span>
+            </span>
+            <span className="status-badge bg-[var(--lavender)]">
+              <Pin className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Your pick</span>
+            </span>
+            <span className="status-badge status-badge-limited">
+              <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Conflict</span>
+            </span>
+          </div>
+
+          {/* 6-Day × 8-Hour Grid */}
+          <div className="mt-4 overflow-x-auto">
+            <div className="min-w-[540px]">
+              <div className="grid grid-cols-7 gap-1.5 text-center text-sm font-bold text-[var(--ink)]">
+                <div className="py-1.5 text-left">Time</div>
+                {weekDates.map((date) => {
+                  const { weekday, shortDate } = formatDayHeader(date);
+                  return (
+                    <div
+                      key={date}
+                      className="rounded-[8px] border border-[var(--ink)]/30 bg-[var(--paper)] py-1"
+                    >
+                      <div>{weekday}</div>
+                      <div className="text-xs font-normal tabular-nums">{shortDate}</div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="mt-2 space-y-1.5">
+                {START_HOURS.map((hour, rowIdx) => {
+                  const startStr = formatHour(hour);
+                  return (
+                    <div key={startStr} className="grid grid-cols-7 items-center gap-1.5">
+                      <div className="tabular-nums text-sm font-bold text-[var(--ink)]">
+                        {startStr}
+                      </div>
+                      {weekDates.map((date, colIdx) => {
+                        const key = `${date}|${startStr}`;
+                        const slot = slotLookup.get(key);
+                        const isBooked = slot?.status === 'booked';
+                        const isConflict = !isBooked && conflictSlotKeys.has(key);
+                        const isPicked = !isBooked && pickedSlotKeys.has(key);
+
+                        let stateLabel = 'free';
+                        let cellBg = 'bg-[var(--white)] hover:bg-[var(--lavender-soft)]';
+                        let CellIcon = CheckCircle2;
+                        let shortText = 'Free';
+
+                        if (isBooked) {
+                          stateLabel = `booked by ${slot?.bookedBy ?? 'student'}`;
+                          cellBg = 'bg-[var(--status-booked-bg)] opacity-85 cursor-not-allowed';
+                          CellIcon = Lock;
+                          shortText = 'Booked';
+                        } else if (isPicked) {
+                          stateLabel = 'your pick';
+                          cellBg = 'bg-[var(--lavender)] shadow-[2px_2px_0_var(--ink)]';
+                          CellIcon = Pin;
+                          shortText = 'Pick';
+                        } else if (isConflict) {
+                          stateLabel = 'conflict';
+                          cellBg = 'bg-[var(--status-limited-bg)] hover:bg-[var(--lavender-soft)]';
+                          CellIcon = AlertTriangle;
+                          shortText = 'Conflict';
+                        }
+
+                        const isFirstGridButton = rowIdx === 0 && colIdx === 0;
+
+                        return (
+                          <button
+                            key={key}
+                            ref={isFirstGridButton ? firstCalendarSlotRef : undefined}
+                            type="button"
+                            disabled={isBooked}
+                            aria-pressed={isPicked}
+                            aria-label={formatFullDayHourLabel(date, hour, stateLabel)}
+                            onClick={() => handleSelectCalendarSlot(date, startStr)}
+                            className={`flex min-h-[42px] items-center justify-center gap-1 rounded-[8px] border-2 border-[var(--ink)] px-1.5 py-1 text-xs font-bold text-[var(--ink)] transition-colors cursor-pointer ${cellBg}`}
+                          >
+                            <CellIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                            <span>{shortText}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* Active Week Bookings List with Release Control */}
+          {activeWeekBookings.length > 0 && (
+            <div className="mt-5 border-t-2 border-dashed border-[var(--ink)]/25 pt-4">
+              <h3 className="text-xl font-bold text-[var(--ink)]">
+                Booked Sessions This Week
+              </h3>
+              <ul className="mt-2 space-y-2">
+                {activeWeekBookings.map((slot) => (
+                  <li
+                    key={slot.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-[10px] border-2 border-[var(--ink)] bg-[var(--paper)] px-3 py-2 text-sm"
+                  >
+                    <div>
+                      <span className="font-bold tabular-nums">
+                        {slot.date} · {slot.window}
+                      </span>
+                      <span className="ml-2">
+                        — {slot.bookedBy} {slot.note ? `(${slot.note})` : ''}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleReleaseSlot(slot.id, slot.window, slot.date)}
+                      className="labora-btn labora-btn-paper !min-h-[36px] !px-3 !py-1 text-xs"
+                    >
+                      Release Slot
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+
+        {/* Booking Form OR Access Gate */}
+        <section className="notebook-sheet p-5 xl:col-span-5">
+          {!accessCheck.allowed ? (
+            <div>
+              <div className="flex items-center gap-2 border-b-2 border-[var(--ink)] pb-3">
+                <ShieldAlert className="h-5 w-5 shrink-0 text-[var(--ink)]" aria-hidden="true" />
+                <h2 className="text-2xl font-bold text-[var(--ink)]">
+                  Approval Required Before Booking
+                </h2>
+              </div>
+
+              <div className="mt-4 rounded-[12px] border-2 border-[var(--ink)] bg-[var(--status-limited-bg)] p-4 text-base text-[var(--ink)]">
+                <p className="font-bold">{currentItem.accessLevel}</p>
+                <p className="mt-2 text-base">{accessCheck.reason}</p>
+                <p className="mt-2 text-sm">
+                  Supervisor: <strong>{currentLab?.supervisor}</strong>
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => onNavigate('request', { itemId: currentItem.id })}
+                className="labora-btn mt-5 w-full"
+              >
+                Go to Request Access
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={handleBookingSubmit} noValidate className="space-y-4">
+              <div className="border-b-2 border-[var(--ink)] pb-3">
+                <h2 className="text-2xl font-bold text-[var(--ink)]">
+                  Reserve Bench Session
+                </h2>
+                <p className="text-sm text-[var(--ink)]">
+                  Booking as <strong>{currentUser.name}</strong> ({accessCheck.reason})
+                </p>
+              </div>
+
+              {validationErrors.length > 0 && (
+                <div
+                  role="alert"
+                  className="rounded-[10px] border-2 border-[var(--ink)] bg-[var(--status-booked-bg)] p-3.5 text-sm text-[var(--ink)]"
+                >
+                  <div className="flex items-center gap-1.5 font-bold">
+                    <XCircle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    <span>Please fix the following before booking:</span>
+                  </div>
+                  <ul className="mt-1.5 list-disc space-y-1 pl-5">
+                    {validationErrors.map((err) => (
+                      <li key={err}>{err}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div>
+                <label
+                  htmlFor="book-date"
+                  className="mb-1 block text-sm font-bold text-[var(--ink)]"
+                >
+                  Date
+                </label>
+                <input
+                  id="book-date"
+                  type="date"
+                  value={bookingDate}
+                  onChange={(e) => setBookingDate(e.target.value)}
+                  className="notebook-input tabular-nums"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label
+                    htmlFor="book-start"
+                    className="mb-1 block text-sm font-bold text-[var(--ink)]"
+                  >
+                    Start time
+                  </label>
+                  <select
+                    id="book-start"
+                    value={bookingStart}
+                    onChange={(e) => setBookingStart(e.target.value)}
+                    className="notebook-input tabular-nums"
+                  >
+                    {START_HOURS.map((h) => {
+                      const val = formatHour(h);
+                      return (
+                        <option key={val} value={val}>
+                          {val}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="book-duration"
+                    className="mb-1 block text-sm font-bold text-[var(--ink)]"
+                  >
+                    Duration (hours)
+                  </label>
+                  <select
+                    id="book-duration"
+                    value={durationHours}
+                    onChange={(e) => setDurationHours(Number.parseInt(e.target.value, 10))}
+                    className="notebook-input tabular-nums"
+                  >
+                    {[1, 2, 3, 4].map((hrs) => (
+                      <option key={hrs} value={hrs}>
+                        {hrs} {hrs === 1 ? 'hour' : 'hours'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="book-purpose"
+                  className="mb-1 block text-sm font-bold text-[var(--ink)]"
+                >
+                  Purpose
+                </label>
+                <textarea
+                  id="book-purpose"
+                  rows={3}
+                  value={purpose}
+                  onChange={(e) => setPurpose(e.target.value)}
+                  placeholder="Describe your measurement, sample, or course lab run..."
+                  className="notebook-input"
+                  required
+                />
+              </div>
+
+              <button type="submit" className="labora-btn w-full">
+                <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+                Confirm Slot Booking
+              </button>
+            </form>
+          )}
+        </section>
+      </div>
     </div>
   );
 }

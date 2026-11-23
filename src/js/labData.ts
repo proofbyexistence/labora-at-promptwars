@@ -1,4 +1,6 @@
 import seedData from '../data/labs.json';
+import type { AllocationResult } from './scheduler';
+import { formatHour, parseHour } from './scheduler';
 import type {
   AccessRequest,
   CampusUser,
@@ -260,9 +262,78 @@ export function cancelSlotBooking(slotId: string, itemId: string): TimeSlot | nu
   slot.booked = false;
   slot.bookedBy = null;
   slot.note = '';
+  slot.status = 'free';
+  slot.requestId = null;
   syncItemAvailabilityFromSlots(itemId);
   persistState();
   return { ...slot };
+}
+
+export function createCustomBooking(input: {
+  itemId: string;
+  date: string;
+  start: string;
+  durationHours: number;
+  purpose: string;
+  bookedBy?: string;
+  requestId?: string | null;
+}): TimeSlot | null {
+  const startHour = parseHour(input.start);
+  if (!Number.isFinite(startHour) || input.durationHours < 1) {
+    return null;
+  }
+
+  const end = formatHour(startHour + input.durationHours);
+  const user = getCurrentUser();
+  const created: TimeSlot = {
+    id: `sl-custom-${input.itemId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    itemId: input.itemId,
+    date: input.date,
+    window: `${input.start} – ${end}`,
+    durationHours: input.durationHours,
+    booked: true,
+    bookedBy: input.bookedBy ?? user.name,
+    note: input.purpose.trim(),
+    start: input.start,
+    end,
+    status: 'booked',
+    requestId: input.requestId ?? null,
+  };
+
+  state.dataset.slots.push(created);
+  syncItemAvailabilityFromSlots(input.itemId);
+  persistState();
+  return { ...created };
+}
+
+export function applyAllocationSuggestion(result: AllocationResult): void {
+  for (const assignment of result.assignments) {
+    createCustomBooking({
+      itemId: assignment.itemId,
+      date: assignment.date,
+      start: assignment.start,
+      durationHours: assignment.durationHours,
+      purpose: `AI Fair Allocation (${assignment.score}/100)`,
+      bookedBy: assignment.student,
+      requestId: assignment.requestId,
+    });
+
+    const req = state.dataset.requests.find((r) => r.id === assignment.requestId);
+    if (req) {
+      req.status = 'Approved';
+      req.facultyNote = `Allocated ${assignment.date} ${assignment.start}–${assignment.end} via fair-allocation engine.`;
+    }
+  }
+
+  for (const alt of result.alternatives) {
+    const req = state.dataset.requests.find((r) => r.id === alt.requestId);
+    if (req) {
+      req.status = 'Needs Info';
+      req.facultyNote = alt.reason;
+    }
+  }
+
+  persistState();
 }
 
 export function submitAccessRequest(input: NewRequestInput): AccessRequest | null {
