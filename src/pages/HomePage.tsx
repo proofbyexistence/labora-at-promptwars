@@ -36,7 +36,7 @@ export function HomePage({ onNavigate, onInspectItem }: HomePageProps) {
         <div className="grid grid-cols-1 items-center gap-6 lg:grid-cols-12">
           <div className="flex flex-col justify-between lg:col-span-7">
             <div>
-              <p className="inline-block rounded-[8px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-3 py-0.5 text-sm font-bold text-[var(--ink)]">
+              <p className="inline-block rounded-[8px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-3 py-0.5 text-sm font-bold text-[var(--on-lavender)]">
                 LabLink Campus Resource Sharing
               </p>
               <h1 className="mt-3 text-4xl font-bold tracking-tight text-[var(--ink)] headline-balance sm:text-5xl">
@@ -150,7 +150,7 @@ export function HomePage({ onNavigate, onInspectItem }: HomePageProps) {
               >
                 <div>
                   <div className="flex items-center justify-between gap-3">
-                    <span className="rounded-[8px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-2.5 py-0.5 text-sm font-bold text-[var(--ink)]">
+                    <span className="rounded-[8px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-2.5 py-0.5 text-sm font-bold text-[var(--on-lavender)]">
                       {dept.code} · {dept.building}
                     </span>
                     <DepartmentDoodle departmentId={dept.id} className="h-10 w-10 shrink-0" />

@@ -14,9 +14,17 @@ import {
   getRequests,
 } from '../js/labData';
 import { isPendingStatus } from '../js/requests';
+import {
+  applyTheme,
+  getInitialTheme,
+  saveTheme,
+  watchSystemTheme,
+  type ThemeMode,
+} from '../js/theme';
 import type { CampusUser, UserRole } from '../js/types';
+import { DaydreamStrip } from './DaydreamStrip';
 import type { PageId } from './EquipmentCard';
-import { DaydreamStripDoodle, DepartmentDoodle, FlaskDoodle } from './LabDoodles';
+import { DepartmentDoodle, FlaskDoodle } from './LabDoodles';
 
 export interface BreadcrumbItem {
   label: string;
@@ -58,14 +66,20 @@ export function Layout({
   children,
 }: LayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [paperMode, setPaperMode] = useState<'day' | 'dusk'>('day');
+  const [theme, setTheme] = useState<ThemeMode>(getInitialTheme);
   const [expandedDeptIds, setExpandedDeptIds] = useState<Record<string, boolean>>(() =>
     selectedDepartmentId ? { [selectedDepartmentId]: true } : {}
   );
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-paper-mode', paperMode);
-  }, [paperMode]);
+    applyTheme(theme);
+  }, [theme]);
+
+  useEffect(() => {
+    return watchSystemTheme((systemTheme) => {
+      setTheme(systemTheme);
+    });
+  }, []);
 
   useEffect(() => {
     // Keep the active department expanded in the Lab Index when navigated via URL/breadcrumbs.
@@ -166,12 +180,18 @@ export function Layout({
 
             <button
               type="button"
-              onClick={() => setPaperMode((prev) => (prev === 'day' ? 'dusk' : 'day'))}
+              onClick={() => {
+                const nextTheme: ThemeMode = theme === 'light' ? 'dark' : 'light';
+                setTheme(nextTheme);
+                applyTheme(nextTheme);
+                saveTheme(nextTheme);
+              }}
               className="labora-btn labora-btn-paper !px-3"
-              aria-label={paperMode === 'day' ? 'Switch to dusk notebook tint' : 'Switch to bright paper tint'}
-              title={paperMode === 'day' ? 'Dusk paper tint' : 'Daylight paper tint'}
+              aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+              aria-pressed={theme === 'dark'}
+              title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
             >
-              {paperMode === 'day' ? (
+              {theme === 'light' ? (
                 <Moon className="h-4 w-4" aria-hidden="true" />
               ) : (
                 <Sun className="h-4 w-4" aria-hidden="true" />
@@ -346,9 +366,7 @@ export function Layout({
 
       {/* Stick-Figure Daydream Strip Above Footer + Shared Footer */}
       <div className="relative z-10 mt-10">
-        <div className="mx-auto max-w-[1360px] px-4 sm:px-6 lg:px-10">
-          <DaydreamStripDoodle className="mx-auto block h-20 w-full max-w-4xl" />
-        </div>
+        <DaydreamStrip />
 
         <footer className="border-t-2 border-[var(--ink)] bg-[var(--white)]">
           <div className="mx-auto flex max-w-[1360px] flex-col gap-4 px-4 py-6 text-base text-[var(--ink)] sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-10">

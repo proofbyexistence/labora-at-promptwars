@@ -1,4 +1,17 @@
 import assert from 'node:assert/strict';
+import express from 'express';
+import http from 'node:http';
+import aiRoutes from '../../server/aiRoutes';
+import {
+  loadServerCatalog,
+  suggestEquipmentFallback,
+} from '../../server/catalogFallback';
+import { stripMarkup } from '../../server/geminiClient';
+import { checkRateLimit } from '../../server/rateLimit';
+import {
+  formatAiSourceLabel,
+  validateProjectDescription,
+} from '../js/ai-client';
 import {
   getSummary,
   getUnderusedItems,
@@ -71,6 +84,11 @@ import {
   scoreRequest,
   validateBooking,
 } from '../js/scheduler';
+import {
+  getInitialTheme,
+  saveTheme,
+  THEME_STORAGE_KEY,
+} from '../js/theme';
 
 function runTests() {
   resetLabStore();
@@ -691,6 +709,153 @@ function runTests() {
   resetLabStore();
 }
 
-runTests();
+async function runAiTests() {
+  // 1. Client validation & source labels
+  assert.equal(validateProjectDescription('   short  ').ok, false);
+  assert.equal(validateProjectDescription('a'.repeat(501)).ok, false);
+  const validDesc = validateProjectDescription('  Measure frequency response of an analog filter.  ');
+  assert.equal(validDesc.ok, true);
+  assert.equal(validDesc.cleaned, 'Measure frequency response of an analog filter.');
+  assert.equal(formatAiSourceLabel('ai'), 'Suggested by AI');
+  assert.equal(formatAiSourceLabel('fallback'), 'Smart keyword match');
+
+  // 2. Markup stripping & compact catalog
+  assert.equal(stripMarkup('<script>alert(1)</script> Oscilloscope <b>probe</b>'), 'alert(1) Oscilloscope probe');
+  const catalog = loadServerCatalog();
+  assert.equal(catalog.compact.length, 43);
+
+  // 3. Deterministic fallback matches catalog items cleanly
+  const fallbackMatches = suggestEquipmentFallback('Need oscilloscope frequency response and soldering station');
+  assert.ok(fallbackMatches.length >= 1 && fallbackMatches.length <= 5);
+  for (const s of fallbackMatches) {
+    assert.ok(catalog.validItemIds.has(s.itemId));
+    assert.ok(s.reason.length > 0 && s.reason.length < 120);
+  }
+
+  // 4. Rate limiter unit check (10 req/min per IP)
+  const testIp = '198.51.100.42';
+  const baseNow = 1_700_000_000_000;
+  for (let i = 0; i < 10; i += 1) {
+    assert.equal(checkRateLimit(testIp, baseNow + i * 100).allowed, true);
+  }
+  const blocked = checkRateLimit(testIp, baseNow + 2000);
+  assert.equal(blocked.allowed, false);
+  assert.ok(blocked.retryAfterSeconds >= 1);
+  assert.equal(checkRateLimit(testIp, baseNow + 62_000).allowed, true);
+
+  // 5. Express /api route validation, payload cap, fallback & 429 checks
+  const prevKey = process.env.GEMINI_API_KEY;
+  process.env.GEMINI_API_KEY = '';
+  const app = express();
+  app.use('/api', aiRoutes);
+
+  const server = await new Promise<http.Server>((resolve) => {
+    const s = app.listen(0, '127.0.0.1', () => resolve(s));
+  });
+
+  try {
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to bind ephemeral test port');
+    }
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    // Valid suggest-equipment fallback
+    const okSuggest = await fetch(`${baseUrl}/api/suggest-equipment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '203.0.113.10' },
+      body: JSON.stringify({ project: 'Microfluidic PDMS device inspection and laser optics' }),
+    });
+    assert.equal(okSuggest.status, 200);
+    const okSuggestJson = (await okSuggest.json()) as {
+      suggestions: Array<{ itemId: string; reason: string }>;
+      source: string;
+    };
+    assert.equal(okSuggestJson.source, 'fallback');
+    assert.ok(okSuggestJson.suggestions.length >= 1 && okSuggestJson.suggestions.length <= 5);
+
+    // Too short -> 400
+    const shortRes = await fetch(`${baseUrl}/api/suggest-equipment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '203.0.113.11' },
+      body: JSON.stringify({ project: 'short' }),
+    });
+    assert.equal(shortRes.status, 400);
+
+    // Over 5 KB -> 413
+    const hugeRes = await fetch(`${baseUrl}/api/suggest-equipment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '203.0.113.12' },
+      body: JSON.stringify({ project: 'x'.repeat(6000) }),
+    });
+    assert.equal(hugeRes.status, 413);
+
+    // Malformed JSON -> 400
+    const badJsonRes = await fetch(`${baseUrl}/api/suggest-equipment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '203.0.113.13' },
+      body: '{not-valid-json',
+    });
+    assert.equal(badJsonRes.status, 400);
+
+    // Valid explain-allocation fallback
+    const items = getItems();
+    const firstConflict = detectConflicts(getRequests(), getSlots(items[0].id))[0];
+    const allocationSample = allocate(
+      firstConflict.requests,
+      getItemById(firstConflict.itemId)!,
+      getSlots(firstConflict.itemId),
+      items
+    );
+    const explainRes = await fetch(`${baseUrl}/api/explain-allocation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '203.0.113.14' },
+      body: JSON.stringify(allocationSample),
+    });
+    assert.equal(explainRes.status, 200);
+    const explainJson = (await explainRes.json()) as { text: string; source: string };
+    assert.equal(explainJson.source, 'fallback');
+    assert.ok(explainJson.text.length >= 15);
+
+    // Malformed explain-allocation -> 400
+    const badExplainRes = await fetch(`${baseUrl}/api/explain-allocation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': '203.0.113.15' },
+      body: JSON.stringify({ ranked: [] }),
+    });
+    assert.equal(badExplainRes.status, 400);
+
+    // Burst rate limit -> 429 on 11th request from same IP
+    const burstIp = '203.0.113.99';
+    for (let i = 0; i < 10; i += 1) {
+      const r = await fetch(`${baseUrl}/api/suggest-equipment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-forwarded-for': burstIp },
+        body: JSON.stringify({ project: 'Need oscilloscope and signal generator for circuit test' }),
+      });
+      assert.equal(r.status, 200);
+    }
+    const burstBlocked = await fetch(`${baseUrl}/api/suggest-equipment`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': burstIp },
+      body: JSON.stringify({ project: 'Need oscilloscope and signal generator for circuit test' }),
+    });
+    assert.equal(burstBlocked.status, 429);
+  } finally {
+    process.env.GEMINI_API_KEY = prevKey;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+}
+
+async function main() {
+  assert.equal(THEME_STORAGE_KEY, 'labora_theme_v1');
+  assert.equal(getInitialTheme(), 'light');
+  saveTheme('dark'); // safely no-ops outside browser window without throwing
+  runTests();
+  await runAiTests();
+}
+
+main();
+
 
 

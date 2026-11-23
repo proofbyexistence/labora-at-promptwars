@@ -60,7 +60,7 @@ h4 {
   right: 22px;
   width: 52px;
   height: 15px;
-  background-color: rgba(205, 185, 242, 0.72);
+  background-color: var(--tape-bg);
   border: 1.5px solid var(--ink);
   border-radius: 2px;
   transform: rotate(3deg);
@@ -84,7 +84,7 @@ h4 {
   min-height: 44px;
   padding: 0.45rem 1.05rem;
   background-color: var(--lavender);
-  color: var(--ink);
+  color: var(--on-lavender);
   border: var(--border-width) solid var(--ink);
   border-radius: var(--radius-btn);
   font-family: var(--font-body);
@@ -130,6 +130,7 @@ h4 {
 
 .labora-btn-paper {
   background-color: var(--white);
+  color: var(--ink);
 }
 
 .labora-btn-paper:hover:not(:disabled) {
@@ -161,6 +162,7 @@ h4 {
 
 .lab-index-tab-active {
   background-color: var(--lavender);
+  color: var(--on-lavender);
   box-shadow: 2px 2px 0 var(--ink);
   transform: translateX(4px);
 }
@@ -209,6 +211,7 @@ h4 {
 
 .nav-link-active {
   background-color: var(--lavender);
+  color: var(--on-lavender);
   border: var(--border-width) solid var(--ink);
   box-shadow: 2px 2px 0 var(--ink);
 }
@@ -226,6 +229,11 @@ h4 {
   font-size: 1.05rem;
 }
 
+.notebook-input::placeholder {
+  color: var(--placeholder);
+  opacity: 1;
+}
+
 .notebook-input:disabled {
   background-color: var(--paper);
 }
@@ -241,7 +249,7 @@ textarea:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *,
+  *:not(.daydream-anim),
   *::before,
   *::after {
     animation-duration: 0.01ms !important;

@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "./css/tokens.css";
 @import "./css/pages.css";
+@import "./css/daydream.css";
 
 @layer base {
   html,

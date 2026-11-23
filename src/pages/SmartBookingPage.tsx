@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import {
   AlertTriangle,
   Calendar,
@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Compass,
   Lock,
+  MessageSquareText,
   Pin,
   ShieldAlert,
   Sparkles,
@@ -14,6 +15,11 @@ import {
 } from 'lucide-react';
 import type { PageId } from '../components/EquipmentCard';
 import { EquipmentDoodle, HeroBenchDoodle } from '../components/LabDoodles';
+import {
+  explainAllocationWithAI,
+  formatAiSourceLabel,
+  type AiSource,
+} from '../js/ai-client';
 import {
   applyAllocationSuggestion,
   cancelSlotBooking,
@@ -114,6 +120,12 @@ export function SmartBookingPage({
   const [purpose, setPurpose] = useState('');
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [liveMessage, setLiveMessage] = useState('');
+  const [plainExplanation, setPlainExplanation] = useState<{
+    text: string;
+    source: AiSource;
+  } | null>(null);
+  const [explainLoading, setExplainLoading] = useState(false);
+  const [explainError, setExplainError] = useState('');
 
   const calendarSectionRef = useRef<HTMLElement | null>(null);
   const firstCalendarSlotRef = useRef<HTMLButtonElement | null>(null);
@@ -194,6 +206,38 @@ export function SmartBookingPage({
   const allocationExplanation = allocationResult
     ? explainAllocation(allocationResult)
     : '';
+  const allocationSignature = allocationResult
+    ? `${currentItem.id}:${allocationResult.ranked
+        .map((entry) => `${entry.request.id}=${entry.score}`)
+        .join(',')}:${allocationResult.assignments
+        .map((a) => `${a.requestId}@${a.date}-${a.start}`)
+        .join(',')}`
+    : '';
+
+  useEffect(() => {
+    setPlainExplanation(null);
+    setExplainError('');
+    setExplainLoading(false);
+  }, [allocationSignature]);
+
+  const handleExplainPlainWords = async () => {
+    if (!allocationResult) return;
+    setExplainLoading(true);
+    setExplainError('');
+    try {
+      const result = await explainAllocationWithAI(allocationResult);
+      setPlainExplanation(result);
+    } catch (err) {
+      setPlainExplanation(null);
+      setExplainError(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Unable to explain allocation in plain words right now.'
+      );
+    } finally {
+      setExplainLoading(false);
+    }
+  };
 
   const handleSelectCalendarSlot = (date: string, start: string) => {
     setBookingDate(date);
@@ -323,7 +367,7 @@ export function SmartBookingPage({
                 <ItemStatusIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
                 <span>{currentItem.status}</span>
               </span>
-              <span className="rounded-[8px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-2.5 py-0.5 text-sm font-bold text-[var(--ink)]">
+              <span className="rounded-[8px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-2.5 py-0.5 text-sm font-bold text-[var(--on-lavender)]">
                 {currentItem.accessLevel}
               </span>
             </div>
@@ -429,7 +473,7 @@ export function SmartBookingPage({
                   Fair-Allocation Recommendation
                 </h2>
               </div>
-              <span className="rounded-[8px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-2.5 py-0.5 text-sm font-bold text-[var(--ink)]">
+              <span className="rounded-[8px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-2.5 py-0.5 text-sm font-bold text-[var(--on-lavender)]">
                 Deterministic Priority Score
               </span>
             </div>
@@ -437,6 +481,45 @@ export function SmartBookingPage({
             <p className="mt-3 rounded-[10px] border-2 border-[var(--ink)] bg-[var(--paper)] p-3.5 text-base text-[var(--ink)]">
               {allocationExplanation}
             </p>
+
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+              <button
+                type="button"
+                onClick={handleExplainPlainWords}
+                disabled={explainLoading}
+                aria-busy={explainLoading}
+                className="labora-btn labora-btn-paper text-sm"
+              >
+                <MessageSquareText className="h-4 w-4 shrink-0" aria-hidden="true" />
+                {explainLoading ? 'Writing plain summary...' : 'Explain in plain words'}
+              </button>
+              <span className="text-xs text-[var(--ink)]">
+                Only your project text and the equipment catalog are sent to the AI.
+              </span>
+            </div>
+
+            <div aria-live="polite" className="mt-2">
+              {explainError && (
+                <p
+                  role="alert"
+                  className="rounded-[8px] border-2 border-[var(--ink)] bg-[var(--status-booked-bg)] px-3 py-2 text-sm font-bold text-[var(--ink)]"
+                >
+                  {explainError}
+                </p>
+              )}
+              {plainExplanation && (
+                <div className="rounded-[10px] border-2 border-[var(--ink)] bg-[var(--lavender-soft)] p-3.5 text-base text-[var(--ink)]">
+                  <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-sm font-bold">Plain-language summary</span>
+                    <span className="status-badge bg-[var(--lavender)] !text-[var(--on-lavender)] text-xs">
+                      <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                      <span>{formatAiSourceLabel(plainExplanation.source)}</span>
+                    </span>
+                  </div>
+                  <p>{plainExplanation.text}</p>
+                </div>
+              )}
+            </div>
 
             <ul className="mt-4 space-y-3">
               {allocationResult.ranked.map((entry, idx) => {
@@ -453,7 +536,7 @@ export function SmartBookingPage({
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="text-lg font-bold text-[var(--ink)]">
                         #{idx + 1} · {entry.request.student}
-                        <span className="ml-2 rounded-[8px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-2 py-0.5 text-sm tabular-nums">
+                        <span className="ml-2 rounded-[8px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-2 py-0.5 text-sm tabular-nums text-[var(--on-lavender)]">
                           {entry.score} / 100
                         </span>
                       </div>
@@ -605,7 +688,7 @@ export function SmartBookingPage({
               <Lock className="h-3.5 w-3.5" aria-hidden="true" />
               <span>Booked</span>
             </span>
-            <span className="status-badge bg-[var(--lavender)]">
+            <span className="status-badge bg-[var(--lavender)] !text-[var(--on-lavender)]">
               <Pin className="h-3.5 w-3.5" aria-hidden="true" />
               <span>Your pick</span>
             </span>
@@ -682,7 +765,9 @@ export function SmartBookingPage({
                             aria-pressed={isPicked}
                             aria-label={formatFullDayHourLabel(date, hour, stateLabel)}
                             onClick={() => handleSelectCalendarSlot(date, startStr)}
-                            className={`flex min-h-[42px] items-center justify-center gap-1 rounded-[8px] border-2 border-[var(--ink)] px-1.5 py-1 text-xs font-bold text-[var(--ink)] transition-colors cursor-pointer ${cellBg}`}
+                            className={`flex min-h-[42px] items-center justify-center gap-1 rounded-[8px] border-2 border-[var(--ink)] px-1.5 py-1 text-xs font-bold transition-colors cursor-pointer ${
+                              isPicked ? 'text-[var(--on-lavender)]' : 'text-[var(--ink)]'
+                            } ${cellBg}`}
                           >
                             <CellIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                             <span>{shortText}</span>

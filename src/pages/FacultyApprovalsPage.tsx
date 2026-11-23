@@ -318,7 +318,7 @@ export function FacultyApprovalsPage({
               Review pending student requests, resolve equipment conflicts, and manage campus subjects, labs, equipment, and slots.
             </p>
           </div>
-          <span className="rounded-[10px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-3 py-1.5 text-sm font-bold text-[var(--ink)]">
+          <span className="rounded-[10px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-3 py-1.5 text-sm font-bold text-[var(--on-lavender)]">
             Reviewer: {currentUser.name}
           </span>
         </div>
@@ -802,7 +802,7 @@ export function FacultyApprovalsPage({
       {/* Accessible Focus-Trapped Reason Dialog for Reject / Request Changes */}
       {modalState && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--ink)]/55 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--backdrop)] p-4"
           role="presentation"
           onClick={(e) => {
             if (e.target === e.currentTarget) closeReasonModal();

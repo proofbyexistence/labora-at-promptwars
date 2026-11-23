@@ -64,7 +64,7 @@ export function ItemDetailsDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--ink)]/50 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--backdrop)] p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget) {
           onClose();
@@ -116,7 +116,7 @@ export function ItemDetailsDialog({
             <StatusIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
             <span>{item.status}</span>
           </span>
-          <span className="rounded-[8px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-3 py-0.5 text-sm font-bold text-[var(--ink)]">
+          <span className="rounded-[8px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-3 py-0.5 text-sm font-bold text-[var(--on-lavender)]">
             {item.accessLevel}
           </span>
         </div>

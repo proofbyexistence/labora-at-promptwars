@@ -312,55 +312,6 @@ export function HeroBenchDoodle(props: DoodleProps) {
   );
 }
 
-export function DaydreamStripDoodle(props: DoodleProps) {
-  return (
-    <svg viewBox="0 0 880 88" fill="none" aria-hidden="true" {...props}>
-      {/* Ground line */}
-      <path d="M16 74H864" stroke="var(--ink)" strokeWidth="2" strokeLinecap="round" />
-      {/* Stick-figure student daydreaming at bench */}
-      <circle cx="96" cy="30" r="10" fill="var(--white)" stroke="var(--ink)" strokeWidth="2.2" />
-      <path d="M92 28H94M99 28H101M93 34C95 36 98 36 100 34" stroke="var(--ink)" strokeWidth="1.8" strokeLinecap="round" />
-      <path d="M96 40V58M96 47L116 53M96 47L82 55M96 58L88 74M96 58L104 74" stroke="var(--ink)" strokeWidth="2.2" strokeLinecap="round" />
-      {/* Desk with tiny notebook */}
-      <path d="M112 56H156M120 56V74M148 56V74" stroke="var(--ink)" strokeWidth="2.2" strokeLinecap="round" />
-      <rect x="122" y="48" width="22" height="8" rx="2" fill="var(--lavender)" stroke="var(--ink)" strokeWidth="1.8" />
-      {/* Thought bubbles leading to lab daydream */}
-      <circle cx="122" cy="22" r="3" fill="var(--lavender)" stroke="var(--ink)" strokeWidth="1.6" />
-      <circle cx="136" cy="16" r="4.5" fill="var(--lavender)" stroke="var(--ink)" strokeWidth="1.6" />
-      {/* Dotted trajectory across strip */}
-      <path
-        d="M158 22C240 6 310 42 400 26C490 10 580 44 680 24C740 12 800 28 844 22"
-        stroke="var(--ink)"
-        strokeWidth="1.8"
-        strokeDasharray="5 6"
-        strokeLinecap="round"
-      />
-      {/* Daydream icons along the strip */}
-      <g transform="translate(230 14)">
-        <rect x="0" y="6" width="38" height="28" rx="4" fill="var(--white)" stroke="var(--ink)" strokeWidth="2" />
-        <rect x="5" y="11" width="18" height="14" rx="2" fill="var(--lavender)" stroke="var(--ink)" strokeWidth="1.6" />
-        <path d="M7 18C10 13 13 13 15 18C17 23 19 23 21 18" stroke="var(--ink)" strokeWidth="1.6" strokeLinecap="round" />
-      </g>
-      <g transform="translate(384 12)">
-        <path d="M12 6H24M15 6V16L6 34C5 36 6.5 38 9 38H27C29.5 38 31 36 30 34L21 16V6" fill="var(--white)" stroke="var(--ink)" strokeWidth="2" strokeLinejoin="round" />
-        <path d="M10 27H26L28.5 34H7.5L10 27Z" fill="var(--lavender)" stroke="var(--ink)" strokeWidth="1.6" />
-      </g>
-      <g transform="translate(534 14)">
-        <rect x="4" y="6" width="32" height="30" rx="4" fill="var(--lavender)" stroke="var(--ink)" strokeWidth="2" />
-        <rect x="13" y="14" width="14" height="14" rx="2" fill="var(--white)" stroke="var(--ink)" strokeWidth="1.8" />
-        <path d="M8 14H13M8 26H13M27 14H32M27 26H32" stroke="var(--ink)" strokeWidth="1.8" strokeLinecap="round" />
-      </g>
-      <g transform="translate(690 12)">
-        <circle cx="20" cy="24" r="14" fill="var(--lavender)" stroke="var(--ink)" strokeWidth="2" />
-        <circle cx="20" cy="24" r="6" fill="var(--white)" stroke="var(--ink)" strokeWidth="2" />
-      </g>
-      <g transform="translate(808 16)">
-        <path d="M12 4L15 12L23 15L15 18L12 26L9 18L1 15L9 12Z" fill="var(--lavender)" stroke="var(--ink)" strokeWidth="1.8" />
-      </g>
-    </svg>
-  );
-}
-
 export function DepartmentDoodle({
   departmentId,
   className = 'h-10 w-10',

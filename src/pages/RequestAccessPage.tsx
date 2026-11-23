@@ -489,7 +489,7 @@ export function RequestAccessPage({
                       key={item.id}
                       type="button"
                       onClick={() => toggleEquipmentItem(item.id)}
-                      className="inline-flex items-center gap-1.5 rounded-[8px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-2.5 py-1 text-sm font-bold text-[var(--ink)]"
+                      className="inline-flex items-center gap-1.5 rounded-[8px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-2.5 py-1 text-sm font-bold text-[var(--on-lavender)]"
                       aria-label={`Remove ${item.name}`}
                     >
                       <span>{item.name}</span>
@@ -723,12 +723,12 @@ export function RequestAccessPage({
                         return (
                           <li
                             key={stage}
-                            className={`rounded-[8px] border-2 border-[var(--ink)] px-2.5 py-1.5 text-center text-xs font-bold text-[var(--ink)] ${
+                            className={`rounded-[8px] border-2 border-[var(--ink)] px-2.5 py-1.5 text-center text-xs font-bold ${
                               isFinalBranch
-                                ? 'bg-[var(--status-booked-bg)]'
+                                ? 'bg-[var(--status-booked-bg)] text-[var(--ink)]'
                                 : reached
-                                  ? 'bg-[var(--lavender)]'
-                                  : 'bg-[var(--white)]'
+                                  ? 'bg-[var(--lavender)] text-[var(--on-lavender)]'
+                                  : 'bg-[var(--white)] text-[var(--ink)]'
                             }`}
                           >
                             {idx + 1}. {displayLabel}

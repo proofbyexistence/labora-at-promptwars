@@ -572,7 +572,7 @@ export function CatalogManagePanel({
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="rounded-[6px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-2 py-0.5 text-xs font-bold text-[var(--ink)]">
+                          <span className="rounded-[6px] border-2 border-[var(--ink)] bg-[var(--lavender)] px-2 py-0.5 text-xs font-bold text-[var(--on-lavender)]">
                             {dept.code}
                           </span>
                           <h3 className="text-xl font-bold text-[var(--ink)]">
@@ -1020,7 +1020,7 @@ export function CatalogManagePanel({
       {/* ACCESSIBLE DIALOGS FOR ADD / EDIT / SLOTS / SAFE DELETE */}
       {modal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--ink)]/55 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--backdrop)] p-4"
           role="presentation"
           onClick={(e) => {
             if (e.target === e.currentTarget) closeModal();
