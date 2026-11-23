@@ -1,0 +1,47 @@
+/* Shared LABORA Design Tokens — Single source of truth across all 5 pages */
+:root {
+  /* Required Core Palette */
+  --lavender: #CDB9F2;
+  --lavender-soft: #EFE8FC;
+  --ink: #1F1F24;
+  --white: #FFFFFF;
+  --paper: #FBFAF6;
+  --grid: #E6E1F2;
+
+  /* Semantic Status Surfaces (paired with dark ink text and explicit icon) */
+  --status-available-bg: #E4F5EA;
+  --status-limited-bg: #FFF1CC;
+  --status-booked-bg: #FCE2E2;
+
+  /* Typography */
+  --font-heading: 'Caveat', cursive;
+  --font-body: 'Patrick Hand', cursive, sans-serif;
+  --text-base: 1.125rem;
+  --leading-body: 1.6;
+
+  /* Spacing Scale */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+
+  /* Radii & Borders */
+  --radius-card: 14px;
+  --radius-btn: 10px;
+  --radius-tab: 10px;
+  --radius-badge: 8px;
+  --border-width: 2px;
+
+  /* Shadows */
+  --shadow-card: 4px 4px 0 rgba(31, 31, 36, 0.15);
+  --shadow-lift: 3px 3px 0 var(--ink);
+}
+
+/* Optional soft study-paper tint toggled by the sun/moon navbar button while keeping dark ink */
+html[data-paper-mode="dusk"] {
+  --paper: #F2EDF9;
+  --grid: #DDD2F0;
+}

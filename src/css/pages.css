@@ -1,0 +1,252 @@
+/* Shared LABORA Notebook Theme, Cards, Origami Buttons, Tabs, and Responsive Rules */
+
+.notebook-canvas {
+  position: relative;
+  background-color: var(--paper);
+  background-image:
+    linear-gradient(to right, var(--grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+  color: var(--ink);
+}
+
+/* Thin vertical lavender margin line near left edge on desktop, hidden on mobile */
+@media (min-width: 1024px) {
+  .notebook-canvas::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 28px;
+    width: 2px;
+    background-color: var(--lavender);
+    pointer-events: none;
+    z-index: 1;
+  }
+}
+
+.font-heading,
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-heading);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.headline-balance {
+  text-wrap: balance;
+}
+
+/* Notebook Paper Cards with 2px ink border, 14px radius, 4px offset shadow, and top corner tape */
+.notebook-sheet {
+  position: relative;
+  background-color: var(--white);
+  border: var(--border-width) solid var(--ink);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  color: var(--ink);
+}
+
+.notebook-sheet::before {
+  content: "";
+  position: absolute;
+  top: -8px;
+  right: 22px;
+  width: 52px;
+  height: 15px;
+  background-color: rgba(205, 185, 242, 0.72);
+  border: 1.5px solid var(--ink);
+  border-radius: 2px;
+  transform: rotate(3deg);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.notebook-sheet-alt-tape::before {
+  right: auto;
+  left: 22px;
+  transform: rotate(-3deg);
+}
+
+/* Origami Notebook Buttons: lavender fill, 2px ink border, 44px min height, folded top-right corner */
+.labora-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-height: 44px;
+  padding: 0.45rem 1.05rem;
+  background-color: var(--lavender);
+  color: var(--ink);
+  border: var(--border-width) solid var(--ink);
+  border-radius: var(--radius-btn);
+  font-family: var(--font-body);
+  font-size: 1.05rem;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 0.14s ease, box-shadow 0.14s ease, background-color 0.14s ease;
+}
+
+.labora-btn::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 12px;
+  height: 12px;
+  background: linear-gradient(
+    225deg,
+    var(--paper) 47%,
+    var(--ink) 48%,
+    var(--ink) 58%,
+    var(--white) 59%
+  );
+  border-bottom-left-radius: 3px;
+  pointer-events: none;
+}
+
+.labora-btn:hover:not(:disabled) {
+  transform: translate(-1px, -2px);
+  box-shadow: var(--shadow-lift);
+}
+
+.labora-btn:active:not(:disabled) {
+  transform: translate(0, 0);
+  box-shadow: none;
+}
+
+.labora-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.labora-btn-paper {
+  background-color: var(--white);
+}
+
+.labora-btn-paper:hover:not(:disabled) {
+  background-color: var(--lavender-soft);
+}
+
+/* Lab Index Sidebar Notebook Tabs */
+.lab-index-tab {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 40px;
+  padding: 0.35rem 0.7rem;
+  background-color: var(--paper);
+  color: var(--ink);
+  border: var(--border-width) solid var(--ink);
+  border-radius: var(--radius-tab);
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.14s ease, background-color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.lab-index-tab:hover {
+  background-color: var(--lavender-soft);
+  transform: translateX(3px);
+}
+
+.lab-index-tab-active {
+  background-color: var(--lavender);
+  box-shadow: 2px 2px 0 var(--ink);
+  transform: translateX(4px);
+}
+
+/* Status Badges — dark ink text paired with icon + semantic fill */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.55rem;
+  border: 1.5px solid var(--ink);
+  border-radius: var(--radius-badge);
+  color: var(--ink);
+  font-size: 0.95rem;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.status-badge-available {
+  background-color: var(--status-available-bg);
+}
+
+.status-badge-limited {
+  background-color: var(--status-limited-bg);
+}
+
+.status-badge-booked {
+  background-color: var(--status-booked-bg);
+}
+
+/* Active navigation link highlight */
+.nav-link-notebook {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0.3rem 0.65rem;
+  border-radius: var(--radius-btn);
+  color: var(--ink);
+  white-space: nowrap;
+  transition: background-color 0.14s ease;
+}
+
+.nav-link-notebook:hover {
+  background-color: var(--lavender-soft);
+}
+
+.nav-link-active {
+  background-color: var(--lavender);
+  border: var(--border-width) solid var(--ink);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+/* Form controls styled with crisp ink borders and dark ink text */
+.notebook-input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.45rem 0.75rem;
+  background-color: var(--white);
+  color: var(--ink);
+  border: var(--border-width) solid var(--ink);
+  border-radius: var(--radius-btn);
+  font-family: var(--font-body);
+  font-size: 1.05rem;
+}
+
+.notebook-input:disabled {
+  background-color: var(--paper);
+}
+
+/* Clearly visible 3px focus outline across all interactive elements */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid var(--ink);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
