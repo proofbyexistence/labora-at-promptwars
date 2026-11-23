@@ -1,6 +1,12 @@
 import seedData from '../data/labs.json';
+import {
+  normalizeSelectedItemIds,
+  transitionRequest,
+  validateRequest,
+  type TransitionResult,
+} from './requests';
 import type { AllocationResult } from './scheduler';
-import { formatHour, parseHour } from './scheduler';
+import { DEFAULT_REFERENCE_DATE, formatHour, parseHour } from './scheduler';
 import type {
   AccessRequest,
   CampusUser,
@@ -75,6 +81,20 @@ function ensureSlotsForAllItems(items: EquipmentItem[], seedSlots: TimeSlot[]): 
   return combined;
 }
 
+// Migrate any legacy status strings stored in browser localStorage from earlier builds.
+function normalizePersistedRequest(req: AccessRequest): AccessRequest {
+  const rawStatus = req.status as string;
+  let status: RequestStatus = req.status;
+  if (rawStatus === 'Pending') status = 'Submitted';
+  else if (rawStatus === 'Needs Info') status = 'Changes requested';
+  else if (rawStatus === 'Denied') status = 'Rejected';
+  return {
+    ...req,
+    status,
+    itemIds: req.itemIds && req.itemIds.length > 0 ? req.itemIds : [req.itemId],
+  };
+}
+
 function loadInitialState(): {
   dataset: LabDataset;
   activeRole: UserRole;
@@ -95,8 +115,9 @@ function loadInitialState(): {
           base.slots = parsed.slots;
         }
         if (Array.isArray(parsed.requests) && parsed.requests.length > 0) {
-          base.requests = parsed.requests;
+          base.requests = parsed.requests.map(normalizePersistedRequest);
         }
+        // Demo role switch state persisted locally (defaults to student).
         const role: UserRole =
           parsed.activeRole === 'faculty' ? 'faculty' : 'student';
         return { dataset: base, activeRole: role };
@@ -177,6 +198,10 @@ export function getSlots(itemId: string): TimeSlot[] {
   return state.dataset.slots
     .filter((slot) => slot.itemId === itemId)
     .map((slot) => ({ ...slot }));
+}
+
+export function getAllSlots(): TimeSlot[] {
+  return state.dataset.slots.map((slot) => ({ ...slot }));
 }
 
 export function getRequests(filters: RequestFilters = {}): AccessRequest[] {
@@ -328,8 +353,9 @@ export function applyAllocationSuggestion(result: AllocationResult): void {
   for (const alt of result.alternatives) {
     const req = state.dataset.requests.find((r) => r.id === alt.requestId);
     if (req) {
-      req.status = 'Needs Info';
+      req.status = 'Changes requested';
       req.facultyNote = alt.reason;
+      req.reviewedAt = DEFAULT_REFERENCE_DATE;
     }
   }
 
@@ -337,8 +363,34 @@ export function applyAllocationSuggestion(result: AllocationResult): void {
 }
 
 export function submitAccessRequest(input: NewRequestInput): AccessRequest | null {
-  const item = getItemById(input.itemId);
-  if (!item) {
+  const itemIds = normalizeSelectedItemIds(input);
+  const selectedItems = itemIds
+    .map((id) => getItemById(id))
+    .filter((item): item is EquipmentItem => Boolean(item));
+  if (selectedItems.length === 0 || selectedItems.length !== itemIds.length) {
+    return null;
+  }
+
+  const primaryItem = selectedItems[0];
+  const resolvedDepartmentId = input.departmentId || primaryItem.departmentId;
+  const validation = validateRequest(
+    {
+      ...input,
+      itemIds,
+      departmentId: resolvedDepartmentId,
+      subjectCourse: input.subjectCourse ?? 'LAB 400 · Independent Research',
+      justification:
+        input.justification ??
+        'Requesting scheduled bench access for course research project.',
+      trainingConfirmed: input.trainingConfirmed ?? true,
+    },
+    {
+      departments: state.dataset.departments,
+      items: state.dataset.items,
+      referenceDate: DEFAULT_REFERENCE_DATE,
+    }
+  );
+  if (!validation.ok) {
     return null;
   }
 
@@ -348,16 +400,20 @@ export function submitAccessRequest(input: NewRequestInput): AccessRequest | nul
     id: `req-${nextNumber}-${Date.now().toString(36)}`,
     student: user.name,
     studentId: user.id,
-    departmentId: item.departmentId,
-    itemId: item.id,
-    equipmentNeeded: item.name,
+    departmentId: resolvedDepartmentId,
+    itemId: primaryItem.id,
+    itemIds,
+    equipmentNeeded: selectedItems.map((item) => item.name).join(', '),
     project: input.project.trim(),
+    subjectCourse: (input.subjectCourse ?? 'LAB 400 · Independent Research').trim(),
     deadline: input.deadline,
-    status: 'Pending',
+    status: 'Submitted',
     teamSize: Math.max(1, Number(input.teamSize) || 1),
     hoursNeeded: Math.max(1, Number(input.hoursNeeded) || 1),
-    submittedAt: new Date().toISOString().slice(0, 10),
-    facultyNote: input.justification?.trim() ?? '',
+    submittedAt: DEFAULT_REFERENCE_DATE,
+    justification: (input.justification ?? '').trim(),
+    trainingConfirmed: Boolean(input.trainingConfirmed),
+    facultyNote: '',
   };
 
   state.dataset.requests.unshift(created);
@@ -365,20 +421,56 @@ export function submitAccessRequest(input: NewRequestInput): AccessRequest | nul
   return { ...created };
 }
 
+export function transitionAccessRequest(
+  requestId: string,
+  nextStatus: RequestStatus,
+  reason = ''
+): TransitionResult | null {
+  const idx = state.dataset.requests.findIndex((req) => req.id === requestId);
+  if (idx === -1) {
+    return null;
+  }
+
+  const current = state.dataset.requests[idx];
+  const result = transitionRequest(current, nextStatus, reason, DEFAULT_REFERENCE_DATE);
+  if (result.ok) {
+    state.dataset.requests[idx] = result.request;
+    persistState();
+  }
+  return result;
+}
+
 export function reviewAccessRequest(
   requestId: string,
   decision: RequestStatus,
   facultyNote: string
 ): AccessRequest | null {
-  const target = state.dataset.requests.find((req) => req.id === requestId);
-  if (!target) {
+  const idx = state.dataset.requests.findIndex((req) => req.id === requestId);
+  if (idx === -1) {
     return null;
   }
 
-  target.status = decision;
-  target.facultyNote = facultyNote.trim();
+  let target = state.dataset.requests[idx];
+  // If a faculty reviewer decides directly on a newly Submitted request, step cleanly through Under review.
+  if (
+    target.status === 'Submitted' &&
+    (decision === 'Approved' || decision === 'Rejected' || decision === 'Changes requested')
+  ) {
+    const startReview = transitionRequest(target, 'Under review', '', DEFAULT_REFERENCE_DATE);
+    if (!startReview.ok) {
+      return null;
+    }
+    target = startReview.request;
+  }
+
+  const result = transitionRequest(target, decision, facultyNote, DEFAULT_REFERENCE_DATE);
+  if (!result.ok) {
+    return null;
+  }
+
+  state.dataset.requests[idx] = result.request;
   persistState();
-  return { ...target };
+  return { ...result.request };
 }
 
 export function resetLabStore(): void {

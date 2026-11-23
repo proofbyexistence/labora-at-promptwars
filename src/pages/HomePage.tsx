@@ -7,6 +7,7 @@ import {
   getLabs,
   getRequests,
 } from '../js/labData';
+import { isPendingStatus } from '../js/requests';
 
 interface HomePageProps {
   onNavigate: (
@@ -21,7 +22,7 @@ export function HomePage({ onNavigate, onInspectItem }: HomePageProps) {
   const labs = getLabs();
   const items = getItems();
   const availableItems = items.filter((item) => item.status === 'Available');
-  const pendingRequests = getRequests({ status: 'Pending' });
+  const pendingRequests = getRequests().filter((req) => isPendingStatus(req.status));
 
   const departmentNameMap = new Map(departments.map((d) => [d.id, d.name]));
   const labNameMap = new Map(labs.map((l) => [l.id, l.name]));

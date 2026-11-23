@@ -4,7 +4,12 @@ export type AvailabilityStatus = 'Available' | 'Limited' | 'Booked';
 
 export type AccessLevel = 'Open' | 'Needs faculty approval' | 'Training required';
 
-export type RequestStatus = 'Pending' | 'Approved' | 'Needs Info' | 'Denied';
+export type RequestStatus =
+  | 'Submitted'
+  | 'Under review'
+  | 'Approved'
+  | 'Rejected'
+  | 'Changes requested';
 
 export type UserRole = 'student' | 'faculty';
 
@@ -62,13 +67,18 @@ export interface AccessRequest {
   studentId: string;
   departmentId: string;
   itemId: string;
+  itemIds?: string[];
   equipmentNeeded: string;
   project: string;
+  subjectCourse?: string;
   deadline: string;
   status: RequestStatus;
   teamSize: number;
   hoursNeeded: number;
   submittedAt: string;
+  reviewedAt?: string;
+  justification?: string;
+  trainingConfirmed?: boolean;
   facultyNote: string;
   preferredDate?: string;
   preferredStart?: string;
@@ -110,10 +120,14 @@ export interface RequestFilters {
 }
 
 export interface NewRequestInput {
-  itemId: string;
+  itemId?: string;
+  itemIds?: string[];
+  departmentId?: string;
   project: string;
+  subjectCourse?: string;
   deadline: string;
   teamSize: number;
   hoursNeeded: number;
   justification?: string;
+  trainingConfirmed?: boolean;
 }

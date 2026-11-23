@@ -13,6 +13,7 @@ import {
   getLabs,
   getRequests,
 } from '../js/labData';
+import { isPendingStatus } from '../js/requests';
 import type { CampusUser, UserRole } from '../js/types';
 import type { PageId } from './EquipmentCard';
 import { DaydreamStripDoodle, DepartmentDoodle, FlaskDoodle } from './LabDoodles';
@@ -78,7 +79,7 @@ export function Layout({
   const departments = getDepartments();
   const allLabs = getLabs();
   const allItems = getItems();
-  const pendingRequests = getRequests({ status: 'Pending' });
+  const pendingRequests = getRequests().filter((req) => isPendingStatus(req.status));
 
   const nextRole: UserRole = currentUser.role === 'student' ? 'faculty' : 'student';
 
@@ -149,11 +150,13 @@ export function Layout({
           </nav>
 
           <div className="flex items-center gap-2.5 shrink-0">
+            {/* Demo role switch stored in localStorage for previewing Student vs Faculty views (not real authentication). */}
             <button
               type="button"
               onClick={() => onSwitchRole(nextRole)}
               className="labora-btn text-base"
-              title={`Switch active view to ${nextRole}`}
+              aria-label={`Demo role switch: currently ${currentUser.role === 'student' ? 'Student' : 'Faculty'} (${currentUser.name}). Activate to switch to ${nextRole}.`}
+              title={`Demo role switch — click to preview ${nextRole} view`}
             >
               <RefreshCw className="h-4 w-4 shrink-0" aria-hidden="true" />
               <span>

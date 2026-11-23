@@ -310,6 +310,7 @@ export default function App() {
         <RequestAccessPage
           selectedItemId={selectedItemId}
           currentUser={currentUser}
+          onNavigate={handleNavigate}
           onDataMutated={refreshData}
         />
       )}
@@ -317,7 +318,7 @@ export default function App() {
       {currentPage === 'approvals' && (
         <FacultyApprovalsPage
           currentUser={currentUser}
-          onSwitchRole={handleSwitchRole}
+          onNavigate={handleNavigate}
           onDataMutated={refreshData}
         />
       )}

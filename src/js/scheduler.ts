@@ -302,7 +302,7 @@ export function detectConflicts(
   slots: Array<ScheduleSlot | TimeSlot> = []
 ): ConflictGroup[] {
   const activeRequests = requests.filter(
-    (req) => req.status === 'Pending' || req.status === 'Needs Info'
+    (req) => req.status === 'Submitted' || req.status === 'Under review'
   );
 
   // Group requests by itemId + preferredDate, then check overlapping hourly ranges.
@@ -775,12 +775,12 @@ export function canUserBookItem(
     return { allowed: true, reason: 'Open access or faculty supervisor override.' };
   }
 
-  const hasApprovedRequest = requests.some(
-    (req) =>
-      req.itemId === item.id &&
-      req.status === 'Approved' &&
-      (req.studentId === user.id || req.student === user.name)
-  );
+  const hasApprovedRequest = requests.some((req) => {
+    if (req.status !== 'Approved') return false;
+    const isOwner = req.studentId === user.id || req.student === user.name;
+    if (!isOwner) return false;
+    return req.itemId === item.id || Boolean(req.itemIds?.includes(item.id));
+  });
   if (hasApprovedRequest) {
     return { allowed: true, reason: 'Approved faculty access request on file.' };
   }
